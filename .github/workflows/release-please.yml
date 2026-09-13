@@ -1,0 +1,46 @@
+# release-please opens/updates a "Release PR" on every push to main that accumulates
+# Conventional Commits since the last release; a human merges that PR when ready, which is
+# what actually cuts the vX.Y.Z tag, GitHub Release and CHANGELOG.md entry (release_created
+# is only true on that merge, never on the PR-opening run) -- a major version bump never
+# happens by a bot's own judgement call the way a hand-rolled "resolve the next version from
+# labels" script could. See release-please-config.json for what gets bumped
+# (bump-minor-pre-major keeps a feat! at 0.x from jumping to 1.0 on its own) and
+# .release-please-manifest.json for the current version.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/checkout@v7
+        if: steps.release.outputs.release_created == 'true'
+
+      - uses: actions/setup-node@v7
+        if: steps.release.outputs.release_created == 'true'
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      # Requires an npm access token in this repo's Settings -> Secrets and variables ->
+      # Actions, named NPM_TOKEN. Without it this step fails but the release-please PR merge,
+      # tag and GitHub Release still stand -- only the npm publish is skipped.
+      - name: Publish to npm
+        if: steps.release.outputs.release_created == 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
