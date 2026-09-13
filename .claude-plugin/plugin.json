@@ -1,6 +1,6 @@
 {
   "name": "blender-skill",
-  "description": "Local, headless Blender tools for coding agents. Scaffolding only for now -- no tools implemented yet.",
+  "description": "Local, headless Blender 3D asset pipeline for coding agents: inspect, convert, optimize, render, bake and validate glb/gltf/fbx/obj/stl/usd/usdz/ply/abc files.",
   "version": "0.1.0",
   "author": {
     "name": "kajisho5",

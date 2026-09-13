@@ -24,7 +24,7 @@ const path = require('path');
 
 const SKILL_NAME = 'blender-skill';
 const ROOT = path.resolve(__dirname, '..');
-const PAYLOAD = ['SKILL.md', 'scripts', 'package.json'];
+const PAYLOAD = ['SKILL.md', 'scripts', 'mcp', 'references', 'package.json'];
 
 const args = process.argv.slice(2);
 const has = (flag) => args.includes(flag);
@@ -104,6 +104,6 @@ for (const t of targets) {
 }
 
 if (!has('--uninstall')) {
-  console.log('\nDone. This is scaffolding only -- no Blender tools are implemented yet.');
+  console.log('\nDone. Ask your agent things like "decimate this model to 50k triangles" or "check this glb for Unity".');
 }
 process.exit(failed ? 1 : 0);

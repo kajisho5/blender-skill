@@ -1,0 +1,22 @@
+{
+  "tasks": [
+    {"id": 1, "request": "How many triangles does this model.glb have?", "expect": ["info.py"]},
+    {"id": 2, "request": "Convert model.fbx to glb and make sure nothing got lost", "expect": ["convert.py", "--verify"]},
+    {"id": 3, "request": "Cut this down to about 50,000 triangles", "expect": ["optimize.py", "--decimate-ratio"]},
+    {"id": 4, "request": "Get this ready for a mobile game", "expect": ["optimize.py", "--target-mobile"]},
+    {"id": 5, "request": "Make a turntable render of this asset", "expect": ["render.py", "--turntable"]},
+    {"id": 6, "request": "Give me a quick thumbnail of this glb", "expect": ["render.py"]},
+    {"id": 7, "request": "Show me the wireframe of this mesh", "expect": ["look.py", "--wireframe"]},
+    {"id": 8, "request": "What textures does this model use?", "expect": ["look.py", "--textures"]},
+    {"id": 9, "request": "Compare these two renders side by side", "expect": ["look.py", "--compare"]},
+    {"id": 10, "request": "Check if this glb is ready to import into Unity", "expect": ["check.py", "--target", "unity"]},
+    {"id": 11, "request": "Is this STL watertight enough to 3D print?", "expect": ["check.py", "--target", "3d-print"]},
+    {"id": 12, "request": "Bake this material down to a single texture", "expect": ["bake.py", "--pass", "combined"]},
+    {"id": 13, "request": "Bake an ambient occlusion map for this model", "expect": ["bake.py", "--pass", "ao"]},
+    {"id": 14, "request": "Put these three models in one scene next to each other", "expect": ["scene.py"]},
+    {"id": 15, "request": "Run this whole folder of glbs through decimation and check them all", "expect": ["batch.py"]},
+    {"id": 16, "request": "Convert this model.blend to a usdz for AR Quick Look", "expect": ["convert.py", "usdz"]},
+    {"id": 17, "request": "Does this asset have any non-manifold geometry?", "expect": ["info.py"]},
+    {"id": 18, "request": "Run the full toolchain over these sample files and tell me what fails", "expect": ["verify.py"]}
+  ]
+}
