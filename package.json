@@ -1,0 +1,38 @@
+{
+  "name": "blender-skill",
+  "version": "0.1.0",
+  "description": "Agent Skill scaffolding that gives coding agents (Claude Code, Cursor, Codex) local, headless Blender tools. Scaffolding only for now -- no tools implemented yet.",
+  "keywords": [
+    "blender",
+    "3d",
+    "agent-skill",
+    "claude-code",
+    "cursor",
+    "codex",
+    "skill"
+  ],
+  "license": "MIT",
+  "author": "kajisho5",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kajisho5/blender-skill.git"
+  },
+  "homepage": "https://github.com/kajisho5/blender-skill#readme",
+  "bugs": "https://github.com/kajisho5/blender-skill/issues",
+  "bin": {
+    "blender-skill": "bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node bin/install.js --help >/dev/null"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
