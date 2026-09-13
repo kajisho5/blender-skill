@@ -73,15 +73,19 @@ in the object "<name>"` -- easy to hit on procedurally-generated or CAD-exported
 checks for this up front and raises a clearer message pointing at `look.py --uv` / `check.py`'s
 "UV maps" row instead of surfacing Blender's own error text.
 
-## Some Blender Linux builds' FFMPEG video output is unavailable
+## `bl_rna` enum_items can list a value this Blender build cannot actually assign
 
 `scene.render.image_settings.file_format = 'FFMPEG'` raised `enum "FFMPEG" not found in (...)`
-on a Blender 5.2.1 downloaded fresh in CI, while the identical URL downloaded and tested by hand
-worked fine (`FFMPEG` was present in the enum). The exact cause wasn't pinned down (ldd shows no
-missing shared libraries either way, and a second fresh download reproduced the working case, not
-the failing one) -- treated as "can happen on some builds/environments", not a specific version
-gap. `render.py --turntable` checks `_compat.ffmpeg_output_available()` first and falls back to a
-PNG sequence (`<name>_####.png`) with a warning in the result, rather than failing outright.
+in CI on a Blender 5.2.1 that had rendered a PNG thumbnail successfully moments before. The
+first fix attempt checked `bpy.types.ImageFormatSettings.bl_rna.properties["file_format"]
+.enum_items` ahead of time and trusted its answer -- wrong: that static, structural enum
+definition lists every value the *property type* can ever hold, not what a specific build with
+or without ffmpeg support compiled in can actually assign right now, so it said "yes" even on
+the build that then failed. The reliable check is the assignment itself: `render.py --turntable`
+now wraps `scene.render.image_settings.file_format = "FFMPEG"` in `try/except TypeError` and
+falls back to a PNG sequence (`<name>_####.png`, with a warning in the result) only if that
+actual assignment raises. General lesson: for an enum whose valid values can depend on runtime
+build configuration, `bl_rna`'s `enum_items` is not authoritative -- try the assignment.
 
 ## gltf-transform's Meshopt compression produces a file Blender itself cannot re-import
 

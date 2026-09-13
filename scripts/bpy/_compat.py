@@ -76,17 +76,6 @@ def export_file(path: str, fmt: str, **kwargs) -> None:
     _op(_OPS[fmt][1])(filepath=path, **merged)
 
 
-def ffmpeg_output_available() -> bool:
-    """Some Blender Linux builds' `ImageFormatSettings.file_format` enum does not include
-    'FFMPEG' at all -- confirmed intermittently on Blender 5.2.1 in CI (a fresh, byte-identical
-    download of the same release worked fine when checked by hand; the exact cause wasn't
-    pinned down, so this is treated as "can happen on some builds/environments", not a specific
-    version gap). Callers needing a video output should check this first and fall back to a PNG
-    sequence rather than letting `scene.render.image_settings.file_format = 'FFMPEG'` raise."""
-    items = {e.identifier for e in bpy.types.ImageFormatSettings.bl_rna.properties["file_format"].enum_items}
-    return "FFMPEG" in items
-
-
 def eevee_engine_id() -> str:
     """The real-time engine's RNA identifier renamed between versions: Blender 4.2-4.5 shipped
     the new Eevee under 'BLENDER_EEVEE_NEXT' (with the legacy engine removed); Blender 5.0

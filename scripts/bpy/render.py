@@ -106,15 +106,27 @@ def _mode_turntable(args, scene):
 
     output = args["output"]
     warning = None
-    if output.lower().endswith((".mp4", ".mov")) and _compat.ffmpeg_output_available():
-        scene.render.image_settings.file_format = "FFMPEG"
+    wants_video = output.lower().endswith((".mp4", ".mov"))
+    ffmpeg_ok = False
+    if wants_video:
+        # bl_rna's static enum_items always lists 'FFMPEG' as a structurally possible value for
+        # this property -- it does NOT reliably say whether *this* Blender build actually has
+        # ffmpeg codec support compiled in (confirmed: a build that assigns it successfully and
+        # one that raises on assignment can both report 'FFMPEG' present via enum_items). The
+        # only authoritative check is trying the real assignment.
+        try:
+            scene.render.image_settings.file_format = "FFMPEG"
+            ffmpeg_ok = True
+        except TypeError:
+            pass
+    if ffmpeg_ok:
         scene.render.ffmpeg.format = "MPEG4"
         scene.render.ffmpeg.codec = "H264"
         scene.render.filepath = output
     else:
-        if output.lower().endswith((".mp4", ".mov")):
-            # This Blender build's file_format enum has no 'FFMPEG' entry -- fall back to a PNG
-            # sequence next to the requested path rather than failing the whole render.
+        if wants_video:
+            # No FFMPEG support in this Blender build -- fall back to a PNG sequence next to the
+            # requested path rather than failing the whole render.
             output = str(Path(output).with_name(Path(output).stem + "_####.png"))
             warning = ("this Blender build has no FFMPEG video output support; wrote a PNG "
                        f"sequence instead: {output}")
