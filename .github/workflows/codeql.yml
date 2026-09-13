@@ -1,0 +1,39 @@
+# Static analysis for the languages this repo ships: Python (scripts/) and JavaScript
+# (bin/install.js). Runs on every PR/push to main plus a weekly schedule so a query-pack
+# update can surface something new in code nobody touched recently.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays
+
+# See ci.yml's identical block for why: a superseded run's result is thrown away anyway, so
+# cancelling it saves real Actions minutes rather than just finishing a run nobody will read.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

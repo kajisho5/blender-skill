@@ -1,0 +1,39 @@
+# Runs on every pull request and on pushes to main (workflow_dispatch stays for manual runs).
+# Placeholder until the actual Blender scripts/tests exist: it only proves the installer runs
+# and, if scripts/ gains any Python, that they at least import cleanly.
+name: tests
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+# A push while this is still running on the same PR/branch makes the old run pointless -- its
+# result is about to be superseded anyway. Cancelling it saves Actions minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - run: node bin/install.js --help
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Byte-compile any Python scripts (smoke test)
+        run: |
+          if [ -d scripts ] && [ -n "$(find scripts -name '*.py')" ]; then
+            python -m py_compile scripts/*.py
+          else
+            echo "no Python scripts yet"
+          fi

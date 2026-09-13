@@ -1,0 +1,69 @@
+# Config for release-drafter/release-drafter, used two ways:
+#  - release-drafter.yml (the workflow) runs it live on every push to main, keeping a running
+#    DRAFT release as a human-readable cross-check -- this draft is never auto-published.
+#  - release-drafter.yml *also* runs the autolabeler on every PR open/reopen/sync -- it applies
+#    fix/feature/chore labels to the PR itself from its title/files.
+#
+# release.yml does NOT call release-drafter for the actual version. It resolves the next
+# version with .github/scripts/resolve_version.py, which reads the same labels the autolabeler
+# applies. Keep the label vocabulary here and there in step. `major` is NEVER applied
+# automatically by the autolabeler below; resolve_version.py also refuses a major outright.
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+exclude-labels:
+  - chore
+  - ci
+  - docs
+  - dependencies
+categories:
+  - title: "Fixes"
+    labels:
+      - fix
+      - bug
+  - title: "Features"
+    labels:
+      - feature
+      - enhancement
+change-template: "- $TITLE (#$NUMBER)"
+change-title-escapes: '\<*_&'
+autolabeler:
+  - label: "fix"
+    title:
+      - "/^fix/i"
+      - "/^Fix /"
+  - label: "feature"
+    title:
+      - "/^add/i"
+      - "/^feat/i"
+  - label: "chore"
+    title:
+      - "/^chore/i"
+      - "/^ci:/i"
+      - "/^docs/i"
+      - "/^build\\(deps\\)/"
+    files:
+      - "*.md"
+      - "docs/**"
+      - ".github/**"
+version-resolver:
+  major:
+    labels:
+      - major
+  minor:
+    labels:
+      - minor
+      - feature
+      - enhancement
+  patch:
+    labels:
+      - patch
+      - fix
+      - bug
+  default: patch
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  Cross-check this against CHANGELOG.md's entry for this version (release.yml writes it
+  automatically unless a PR already bumped package.json and wrote its own).

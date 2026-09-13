@@ -1,0 +1,17 @@
+{
+  "name": "blender-skill",
+  "description": "Local, headless Blender tools for coding agents. Scaffolding only for now -- no tools implemented yet.",
+  "version": "0.1.0",
+  "author": {
+    "name": "kajisho5",
+    "url": "https://github.com/kajisho5"
+  },
+  "homepage": "https://github.com/kajisho5/blender-skill",
+  "repository": "https://github.com/kajisho5/blender-skill",
+  "license": "MIT",
+  "keywords": [
+    "blender",
+    "3d",
+    "skill"
+  ]
+}
