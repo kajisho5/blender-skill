@@ -73,6 +73,40 @@ in the object "<name>"` -- easy to hit on procedurally-generated or CAD-exported
 checks for this up front and raises a clearer message pointing at `look.py --uv` / `check.py`'s
 "UV maps" row instead of surfacing Blender's own error text.
 
+## Some Blender Linux builds' FFMPEG video output is unavailable
+
+`scene.render.image_settings.file_format = 'FFMPEG'` raised `enum "FFMPEG" not found in (...)`
+on a Blender 5.2.1 downloaded fresh in CI, while the identical URL downloaded and tested by hand
+worked fine (`FFMPEG` was present in the enum). The exact cause wasn't pinned down (ldd shows no
+missing shared libraries either way, and a second fresh download reproduced the working case, not
+the failing one) -- treated as "can happen on some builds/environments", not a specific version
+gap. `render.py --turntable` checks `_compat.ffmpeg_output_available()` first and falls back to a
+PNG sequence (`<name>_####.png`) with a warning in the result, rather than failing outright.
+
+## gltf-transform's Meshopt compression produces a file Blender itself cannot re-import
+
+`gltf-transform meshopt in.glb out.glb` succeeds and produces a valid, smaller glb (three.js/
+Babylon.js/other EXT_meshopt_compression-aware runtimes read it fine), but re-importing it into
+Blender fails: `Error: Extension EXT_meshopt_compression is not available on this addon version`.
+So `optimize.py --meshopt`'s output cannot be round-tripped through `convert.py --verify` or
+re-opened by any other script in this skill -- that's an inherent limitation of Blender's glTF
+importer, not a bug in the meshopt step itself. Draco-compressed output does not have this
+problem (Blender's importer supports `KHR_draco_mesh_compression` natively).
+
+## Draco compression changes the reported vertex count
+
+`gltf-transform draco` re-indexes geometry as part of encoding; a cube-like mesh that reads as
+1770 vertices before compression can read as 476 after -- real data, not data loss (triangle
+count and visual result are unaffected). Compare triangle counts, not vertex counts, when judging
+whether a Draco pass changed anything meaningful.
+
+## gltf-transform's `uastc`/`etc1s` (KTX2/Basis) commands need a separate `ktx` CLI
+
+`gltf-transform` itself doesn't bundle a KTX2 encoder -- its `uastc`/`etc1s` commands shell out to
+a `ktx` binary from KTX-Software (the current unified CLI; older docs may reference the same
+project's now-superseded standalone `toktx`). Having `gltf-transform` on PATH is not enough to
+assume KTX2 support is available; check for `ktx` separately (`_delegate.ktx_available()`).
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

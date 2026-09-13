@@ -17,28 +17,41 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _common
+import _delegate
 import _formats
 import _run
 from _common import SkillError
 
 TARGETS = ["three.js", "unity", "unreal", "godot", "ios-ar", "android-ar", "webxr", "3d-print", "sketchfab"]
 
-# (preferred formats, triangle budget, texture-px budget, require UV, require manifold)
+# (preferred formats, triangle budget, texture-px budget, require UV, require manifold, transmission-size MB budget or None)
 _SPEC = {
-    "three.js": (["gltf"], 300_000, 4096, False, False),
-    "unity": (["fbx", "gltf"], 250_000, 4096, True, False),
-    "unreal": (["fbx"], 500_000, 4096, True, False),
-    "godot": (["gltf"], 300_000, 4096, True, False),
-    "ios-ar": (["usdz"], 100_000, 4096, True, True),
-    "android-ar": (["gltf"], 100_000, 4096, True, True),
-    "webxr": (["gltf"], 150_000, 2048, False, False),
-    "3d-print": (["stl", "ply", "obj"], 2_000_000, None, False, True),
-    "sketchfab": (["gltf", "fbx", "usdz"], 500_000, 8192, False, False),
+    "three.js": (["gltf"], 300_000, 4096, False, False, 15),
+    "unity": (["fbx", "gltf"], 250_000, 4096, True, False, None),
+    "unreal": (["fbx"], 500_000, 4096, True, False, None),
+    "godot": (["gltf"], 300_000, 4096, True, False, 20),
+    "ios-ar": (["usdz"], 100_000, 4096, True, True, 25),
+    "android-ar": (["gltf"], 100_000, 4096, True, True, 15),
+    "webxr": (["gltf"], 150_000, 2048, False, False, 10),
+    "3d-print": (["stl", "ply", "obj"], 2_000_000, None, False, True, None),
+    "sketchfab": (["gltf", "fbx", "usdz"], 500_000, 8192, False, False, 100),
 }
 
 
+def _size_fix_command(file: str, fmt: str) -> str:
+    """The transmission-size row's fix command: gltf-transform's Draco/KTX2 compression when
+    it's installed, or this skill's own (coarser) texture-cap/decimate flags when it isn't --
+    never silent about which one a reader is actually getting."""
+    if fmt != "gltf":
+        return f"python3 scripts/optimize.py {file} -o out.{fmt} --texture-max 2048"
+    if _delegate.gltf_transform_available():
+        return f"python3 scripts/optimize.py {file} -o out.glb --draco --ktx2  # or --meshopt instead of --draco"
+    return (f"python3 scripts/optimize.py {file} -o out.glb --texture-max 2048  # "
+            f"install gltf-transform ({_delegate.GLTF_TRANSFORM_INSTALL}) for --draco/--meshopt/--ktx2 compression instead")
+
+
 def _check(info: dict, target: str) -> list:
-    fmts, tri_budget, tex_budget, need_uv, need_manifold = _SPEC[target]
+    fmts, tri_budget, tex_budget, need_uv, need_manifold, size_mb_budget = _SPEC[target]
     rows = []
     fmt = info["format"]
     if fmt in fmts:
@@ -76,6 +89,15 @@ def _check(info: dict, target: str) -> list:
                          "fix": "UV unwrapping is not automated by this skill yet; unwrap in Blender or a DCC tool"})
         else:
             rows.append({"check": "UV maps", "status": "PASS", "detail": "every mesh has a UV map"})
+
+    if size_mb_budget:
+        size_mb = Path(info["file"]).stat().st_size / (1024 * 1024)
+        if size_mb <= size_mb_budget:
+            rows.append({"check": "transmission size", "status": "PASS", "detail": f"{size_mb:.1f} MB <= {size_mb_budget} MB"})
+        else:
+            rows.append({"check": "transmission size", "status": "WARN",
+                         "detail": f"{size_mb:.1f} MB > {size_mb_budget} MB",
+                         "fix": _size_fix_command(info["file"], fmt)})
 
     if need_manifold:
         bad = [o["name"] for o in info["meshes"]["per_object"] if o["non_manifold_edges"]]

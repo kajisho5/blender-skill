@@ -35,7 +35,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, cap
-  texture resolution, purge orphan data; `--target-web`/`--target-mobile`/`--target-ar` presets.
+  texture resolution, purge orphan data; `--target-web`/`--target-mobile`/`--target-ar` presets;
+  `--draco`/`--meshopt`/`--ktx2` delegate to [gltf-transform](https://github.com/donmccurdy/glTF-Transform)
+  (and, for `--ktx2`, the [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI)
+  when installed, and say so and skip just that step when they aren't.
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a
@@ -69,7 +72,7 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 |---|---|
 | `info.py` | Inspect: counts, scale, bounding box, manifold/UV checks |
 | `convert.py` | Cross-format conversion, with round-trip `--verify` |
-| `optimize.py` | Decimate, weld, triangulate, cap texture size, purge unused |
+| `optimize.py` | Decimate, weld, triangulate, cap texture size, purge unused, Draco/Meshopt/KTX2 (delegated) |
 | `render.py` | Thumbnail, turntable, 4-view sheet |
 | `look.py` | Wireframe, texture grid, before/after compare, UV layout |
 | `check.py` | Delivery-target PASS/WARN/FAIL with fix commands |

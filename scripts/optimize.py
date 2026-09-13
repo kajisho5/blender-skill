@@ -2,10 +2,18 @@
 """Reduce a 3D file's cost: decimate, weld duplicate vertices, recalc normals, triangulate,
 cap texture resolution, purge unused data blocks. Never overwrites the input.
 
+--draco/--meshopt/--ktx2 delegate to gltf-transform (and, for --ktx2, the KTX-Software `ktx`
+CLI) as a post-process on the glb/gltf this command just wrote -- this skill does not
+reimplement those compressors. Each is a detect-then-delegate: if the tool isn't installed, the
+result says so with an install command rather than failing the whole run (everything Blender did
+is already saved).
+
 Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --decimate-ratio 0.5
   python3 scripts/optimize.py model.glb -o model_optimized.glb --target-mobile
   python3 scripts/optimize.py model.glb -o model_optimized.glb --weld-doubles --triangulate --purge-unused
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
 """
 import argparse
 import json
@@ -14,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _common
+import _delegate
 import _formats
 import _run
 from _common import SkillError
@@ -32,8 +41,14 @@ def main() -> int:
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
+    ap.add_argument("--draco", action="store_true", help="compress geometry with Draco (delegates to gltf-transform; glb/gltf output only)")
+    ap.add_argument("--meshopt", action="store_true", help="compress geometry/animation with Meshopt (delegates to gltf-transform; glb/gltf output only; Blender itself cannot re-import the result -- see references/pitfalls.md)")
+    ap.add_argument("--ktx2", action="store_true", help="compress textures to KTX2/Basis (delegates to gltf-transform + the KTX-Software `ktx` CLI; glb/gltf output only)")
     _common.add_common_args(ap, fast=False, progress=False)
     args = ap.parse_args()
+
+    if args.draco and args.meshopt:
+        ap.error("--draco and --meshopt are alternative geometry compressors -- give at most one")
 
     try:
         in_path = _common.require_exists(args.input, "input")
@@ -41,6 +56,8 @@ def main() -> int:
         out_fmt = _formats.detect_format(args.out)
         if in_fmt is None or out_fmt is None:
             raise SkillError("unrecognized file extension on input or output", kind="input")
+        if (args.draco or args.meshopt or args.ktx2) and out_fmt != "gltf":
+            raise SkillError("--draco/--meshopt/--ktx2 need a glb/gltf output (gltf-transform doesn't operate on other formats)", kind="input")
 
         bpy_args = {
             "path": str(in_path.resolve()), "format": in_fmt,
@@ -63,6 +80,30 @@ def main() -> int:
         return _common.fail(SkillError(result["error"]["message"], kind=result["error"].get("kind", "internal")), args.json)
 
     data = result["data"]
+    data["delegated"] = []
+    out_str = str(Path(args.out).resolve())
+    if args.draco or args.meshopt:
+        subcommand = "draco" if args.draco else "meshopt"
+        if not _delegate.gltf_transform_available():
+            data["delegated"].append({"tool": subcommand, "ran": False, "reason": f"gltf-transform not found ({_delegate.GLTF_TRANSFORM_INSTALL})"})
+        else:
+            try:
+                _delegate.run_gltf_transform(subcommand, out_str, out_str)
+                data["delegated"].append({"tool": subcommand, "ran": True})
+            except SkillError as err:
+                data["delegated"].append({"tool": subcommand, "ran": False, "reason": err.message})
+    if args.ktx2:
+        if not _delegate.gltf_transform_available():
+            data["delegated"].append({"tool": "ktx2", "ran": False, "reason": f"gltf-transform not found ({_delegate.GLTF_TRANSFORM_INSTALL})"})
+        elif not _delegate.ktx_available():
+            data["delegated"].append({"tool": "ktx2", "ran": False, "reason": f"the `ktx` CLI was not found ({_delegate.KTX_INSTALL})"})
+        else:
+            try:
+                _delegate.run_gltf_transform("uastc", out_str, out_str)
+                data["delegated"].append({"tool": "ktx2", "ran": True})
+            except SkillError as err:
+                data["delegated"].append({"tool": "ktx2", "ran": False, "reason": err.message})
+
     if args.json:
         print(json.dumps(data, indent=2, sort_keys=True))
     else:
@@ -75,6 +116,8 @@ def main() -> int:
             print(f"  texture {t['name']}: {t['from']} -> {t['to']}")
         if data["orphan_data_purged"]:
             print(f"  purged {data['orphan_data_purged']} orphan data block(s)")
+        for d in data["delegated"]:
+            print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
     return 0
 
 

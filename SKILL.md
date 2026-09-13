@@ -64,7 +64,7 @@ preview).
 |---|---|
 | `info.py FILE` | Object/mesh/material/texture/animation/armature counts, unit scale, bounding box, non-manifold-edge and duplicate-vertex detection, UV presence. The foundation every other script leans on. |
 | `convert.py FILE -o OUT [--verify]` | Cross-format conversion: glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend. |
-| `optimize.py FILE -o OUT [--decimate-ratio R] [--weld-doubles] [--recalc-normals] [--triangulate] [--texture-max PX] [--purge-unused] [--target-web\|--target-mobile\|--target-ar]` | Shrink triangle count, texture size, and orphan data. |
+| `optimize.py FILE -o OUT [--decimate-ratio R] [--weld-doubles] [--recalc-normals] [--triangulate] [--texture-max PX] [--purge-unused] [--target-web\|--target-mobile\|--target-ar] [--draco\|--meshopt] [--ktx2]` | Shrink triangle count, texture size, and orphan data; `--draco`/`--meshopt`/`--ktx2` delegate to gltf-transform (and, for `--ktx2`, the KTX-Software `ktx` CLI) if installed, otherwise say so and skip just that step. |
 | `render.py FILE -o OUT [--turntable] [--sheet] [--cycles] [--light studio\|outdoor]` | Thumbnail (default), 360° turntable (PNG sequence or FFmpeg-encoded video), or a 4-view sheet. |
 | `look.py FILE --uv\|--wireframe\|--textures -o OUT` / `look.py --compare A B -o OUT` | The agent's eyes: UV layout (SVG), a wireframe render, a texture grid, or a before/after comparison. |
 | `check.py FILE --target NAME` | PASS/WARN/FAIL against a delivery target's budget, with a fix command per row. |

@@ -32,8 +32,8 @@ what v0.1.0 actually does.
 | RM-019 | convert | STL 出力の3Dプリント向け（単位・マニフォールド・壁厚） | planned | |
 | RM-020 | convert | Alembic 入出力 | done | |
 | RM-021 | convert | PLY 点群の入出力と間引き | planned | |
-| RM-022 | convert | Draco 圧縮（Blender glTFエクスポーターの設定経由） | planned | |
-| RM-023 | convert | KTX2/Basis テクスチャ（toktxがあれば使う、無ければ案内） | planned | |
+| RM-022 | convert | Draco 圧縮（Blender glTFエクスポーターの設定経由） | done | |
+| RM-023 | convert | KTX2/Basis テクスチャ（toktxがあれば使う、無ければ案内） | done | |
 | RM-024 | convert | WebP テクスチャ変換 | planned | |
 | RM-025 | convert | .blend → .blend のバージョン変換（古い.blendを4.x/5.xで再保存） | done | |
 | RM-026 | convert | 複数ファイル→1つのglbへマージ | done | |
