@@ -53,7 +53,8 @@ def main() -> int:
         scene_path = _common.require_exists(args.scene, "scene.json")
         spec = json.loads(scene_path.read_text(encoding="utf-8"))
 
-        bpy_args = {"scene": spec, "scene_dir": str(scene_path.resolve().parent), "output_override": args.out}
+        bpy_args = {"scene": spec, "scene_dir": str(scene_path.resolve().parent),
+                    "output_override": str(Path(args.out).resolve()) if args.out else None}
         if args.export:
             export_fmt = _formats.detect_format(args.export)
             if export_fmt is None:

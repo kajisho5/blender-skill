@@ -44,6 +44,9 @@ def run(args):
     targets = [o for o in bpy.data.objects if o.type == "MESH" and (not names or o.name in names)]
     if not targets:
         raise ValueError("no matching mesh objects to bake")
+    no_uv = [o.name for o in targets if not o.data.uv_layers]
+    if no_uv:
+        raise ValueError(f"no UV map on: {', '.join(no_uv)} (baking needs one -- see look.py --uv or check.py's 'UV maps' row)")
 
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"

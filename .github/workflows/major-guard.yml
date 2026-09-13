@@ -1,0 +1,45 @@
+# A safety net on top of release-please's own PR-then-merge design: a release-please Release PR
+# (carries the `autorelease: pending` label) that would bump the major version fails this
+# required check unless a human has also applied `release:major` to the PR. bump-minor-pre-major
+# in release-please-config.json already keeps a 0.x `feat!:` from reaching 1.0 on its own, but
+# this catches every other path to a major bump (a hand-edited package.json in the PR, a config
+# change, a future release-please behavior change) with the same rule: a major version is a
+# deliberate, human-labeled decision, never something a bot infers alone.
+name: major-guard
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    if: "contains(github.event.pull_request.labels.*.name, 'autorelease: pending')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare the Release PR's version against the last tag's major
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HAS_MAJOR_LABEL: "${{ contains(github.event.pull_request.labels.*.name, 'release:major') }}"
+        run: |
+          NEW_VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | tail -n1)
+          if [ -z "$NEW_VERSION" ]; then
+            echo "::error::could not find a version in the Release PR title: $PR_TITLE"
+            exit 1
+          fi
+          LAST_TAG=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          LAST_VERSION="${LAST_TAG#v}"
+          LAST_VERSION="${LAST_VERSION:-0.0.0}"
+          NEW_MAJOR="${NEW_VERSION%%.*}"
+          LAST_MAJOR="${LAST_VERSION%%.*}"
+          echo "last=$LAST_VERSION new=$NEW_VERSION"
+          if [ "$NEW_MAJOR" != "$LAST_MAJOR" ] && [ "$HAS_MAJOR_LABEL" != "true" ]; then
+            echo "::error::this Release PR bumps the major version ($LAST_VERSION -> $NEW_VERSION) without a 'release:major' label; add the label if this is intentional"
+            exit 1
+          fi
+          echo "ok"

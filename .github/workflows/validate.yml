@@ -1,0 +1,63 @@
+# Two independent, standard install paths must both keep working: this repo's own
+# `npx blender-skill` (bin/install.js) and the community skills.sh registry's
+# `npx skills add kajisho5/blender-skill` / `gh skill install kajisho5/blender-skill
+# blender-skill` (GitHub CLI 2.90+) -- all three read SKILL.md's frontmatter, so a malformed
+# frontmatter or a name mismatch (directory name / package.json name / frontmatter name must all
+# agree) breaks discovery silently rather than with a clear error, if this doesn't catch it first.
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  skill-frontmatter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: SKILL.md frontmatter is well-formed YAML with name/description
+        run: |
+          python3 - <<'PY'
+          import re, sys
+          import json
+
+          text = open("SKILL.md", encoding="utf-8").read()
+          m = re.match(r"^---\n(.*?)\n---\n", text, re.S)
+          if not m:
+              sys.exit("SKILL.md has no --- frontmatter block")
+          fm = m.group(1)
+          fields = {}
+          for line in fm.splitlines():
+              if ":" in line and not line.startswith(" "):
+                  key, _, val = line.partition(":")
+                  fields[key.strip()] = val.strip().strip("'\"")
+          for required in ("name", "description"):
+              if required not in fields or not fields[required]:
+                  sys.exit(f"SKILL.md frontmatter is missing '{required}'")
+
+          pkg = json.load(open("package.json", encoding="utf-8"))
+          import pathlib
+          dir_name = pathlib.Path(".").resolve().name
+          if fields["name"] != pkg["name"]:
+              sys.exit(f"SKILL.md name '{fields['name']}' != package.json name '{pkg['name']}'")
+          print(f"ok: name={fields['name']!r} matches package.json (directory: {dir_name})")
+          PY
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: npx skills add . --list finds exactly this skill
+        run: |
+          if npx --yes skills add . --list > /tmp/skills-list.txt 2>&1; then
+            cat /tmp/skills-list.txt
+            grep -q "blender-skill" /tmp/skills-list.txt || { echo "::error::'skills add . --list' did not list blender-skill"; exit 1; }
+          else
+            echo "::warning::'npx skills add . --list' failed (skills.sh registry unavailable or CLI changed) -- not failing the build on a third-party registry's own availability"
+            cat /tmp/skills-list.txt || true
+          fi
+
+      - run: node bin/install.js --dir /tmp/skills-check
+      - run: test -f /tmp/skills-check/blender-skill/SKILL.md

@@ -1,0 +1,44 @@
+name: Bug report
+description: Something in a script/tool doesn't behave as documented
+labels: [fix]
+body:
+  - type: input
+    id: script
+    attributes:
+      label: Script and version
+      placeholder: "e.g. optimize.py, blender-skill 0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact scripts/*.py invocation, flags included
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: The real error/output, not a paraphrase
+    validations:
+      required: true
+  - type: textarea
+    id: info-json
+    attributes:
+      label: "info.py --json output (if relevant)"
+      render: json
+  - type: input
+    id: environment
+    attributes:
+      label: OS / Blender version
+      placeholder: "e.g. macOS 14, Blender 4.5.13 LTS"
+    validations:
+      required: true

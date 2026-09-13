@@ -64,7 +64,7 @@ def _add_lighting(preset: str):
 
 def _setup_scene(engine: str, resolution, samples):
     scene = bpy.context.scene
-    scene.render.engine = "CYCLES" if engine == "cycles" else "BLENDER_EEVEE_NEXT"
+    scene.render.engine = "CYCLES" if engine == "cycles" else _compat.eevee_engine_id()
     if engine == "cycles":
         scene.cycles.samples = samples
     else:

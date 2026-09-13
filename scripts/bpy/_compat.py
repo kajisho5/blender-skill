@@ -76,6 +76,18 @@ def export_file(path: str, fmt: str, **kwargs) -> None:
     _op(_OPS[fmt][1])(filepath=path, **merged)
 
 
+def eevee_engine_id() -> str:
+    """The real-time engine's RNA identifier renamed between versions: Blender 4.2-4.5 shipped
+    the new Eevee under 'BLENDER_EEVEE_NEXT' (with the legacy engine removed); Blender 5.0
+    renamed it back to 'BLENDER_EEVEE' now that there is only one Eevee again. Confirmed on
+    real Blender 4.2.23, 4.5.13 and 5.2.1 -- render.py and look.py call this instead of
+    hardcoding either string."""
+    available = {e.identifier for e in bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items}
+    if "BLENDER_EEVEE_NEXT" in available:
+        return "BLENDER_EEVEE_NEXT"
+    return "BLENDER_EEVEE"
+
+
 def object_triangle_count(obj) -> int:
     """Triangle count as the renderer sees it (quads/ngons counted as their triangulation),
     without permanently triangulating the mesh. bmesh avoids the destructive

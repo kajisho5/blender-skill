@@ -24,7 +24,7 @@ import numpy as np
 
 def _quick_render(output: str, resolution=(480, 480), samples=32):
     scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    scene.render.engine = _compat.eevee_engine_id()
     scene.render.resolution_x, scene.render.resolution_y = resolution
     scene.render.filepath = output
     scene.render.image_settings.file_format = "PNG"

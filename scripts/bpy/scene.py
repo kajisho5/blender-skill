@@ -94,7 +94,7 @@ def run(args):
 
     output = spec.get("output", {})
     scene = bpy.context.scene
-    scene.render.engine = "CYCLES" if output.get("engine") == "cycles" else "BLENDER_EEVEE_NEXT"
+    scene.render.engine = "CYCLES" if output.get("engine") == "cycles" else _compat.eevee_engine_id()
     res = output.get("resolution", [512, 512])
     scene.render.resolution_x, scene.render.resolution_y = res
     scene.render.film_transparent = output.get("transparent", "background" not in spec)
@@ -104,6 +104,8 @@ def run(args):
         scene.eevee.taa_render_samples = output.get("samples", 32)
 
     render_path = args.get("output_override") or output.get("path")
+    if render_path and not Path(render_path).is_absolute():
+        render_path = str(base_dir / render_path)
     result = {"assets_placed": placed}
     if render_path:
         scene.render.filepath = render_path

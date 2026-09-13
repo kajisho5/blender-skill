@@ -1,0 +1,23 @@
+name: Feature request
+description: A new tool, flag, or capability
+labels: [feature]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: What can't this skill do today?
+      description: A concrete request, e.g. "reframe with a tracked subject"
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: What would the command/flag look like?
+      render: shell
+      placeholder: "scripts/whatever.py INPUT --new-flag ... -o OUT"
+  - type: textarea
+    id: why
+    attributes:
+      label: Why can't an existing tool + flag combination already do this?
+    validations:
+      required: true
