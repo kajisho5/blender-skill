@@ -66,7 +66,9 @@ def main() -> int:
     if args.json:
         print(json.dumps(data, indent=2, sort_keys=True))
     else:
-        print(f"wrote {args.out} ({mode})")
+        print(f"wrote {data.get('output_path', args.out)} ({mode})")
+        if data.get("warning"):
+            print(f"  warning: {data['warning']}")
     return 0
 
 

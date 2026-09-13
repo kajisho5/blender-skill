@@ -105,18 +105,26 @@ def _mode_turntable(args, scene):
         pivot.keyframe_insert("rotation_euler", index=2, frame=f)
 
     output = args["output"]
-    if output.lower().endswith((".mp4", ".mov")):
+    warning = None
+    if output.lower().endswith((".mp4", ".mov")) and _compat.ffmpeg_output_available():
         scene.render.image_settings.file_format = "FFMPEG"
         scene.render.ffmpeg.format = "MPEG4"
         scene.render.ffmpeg.codec = "H264"
         scene.render.filepath = output
     else:
-        # A printf-style sequence path (e.g. turntable_####.png); Blender substitutes the frame
-        # number for the run of '#' characters itself.
+        if output.lower().endswith((".mp4", ".mov")):
+            # This Blender build's file_format enum has no 'FFMPEG' entry -- fall back to a PNG
+            # sequence next to the requested path rather than failing the whole render.
+            output = str(Path(output).with_name(Path(output).stem + "_####.png"))
+            warning = ("this Blender build has no FFMPEG video output support; wrote a PNG "
+                       f"sequence instead: {output}")
         scene.render.image_settings.file_format = "PNG"
         scene.render.filepath = output
     bpy.ops.render.render(animation=True)
-    return {"frames": frames}
+    result = {"frames": frames, "output_path": output}
+    if warning:
+        result["warning"] = warning
+    return result
 
 
 def _mode_sheet(args, scene):
