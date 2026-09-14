@@ -24,6 +24,7 @@ OFFSET_ORIGIN_FIXTURE = ROOT / "tests" / "fixtures" / "offset_origin_cube.glb"
 ZERO_AREA_UV_FIXTURE = ROOT / "tests" / "fixtures" / "zero_area_uv_cube.glb"
 OVERLAPPING_UV_FIXTURE = ROOT / "tests" / "fixtures" / "overlapping_uv_cubes.glb"
 VERTEX_COLORS_FIXTURE = ROOT / "tests" / "fixtures" / "vertex_colors_cube.blend"
+ROOT_MOTION_FIXTURE = ROOT / "tests" / "fixtures" / "root_motion_rig.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -206,6 +207,32 @@ class TestToolchain(unittest.TestCase):
             for stats in json.loads(proc.stdout)["meshes"]["per_object"]:
                 self.assertEqual(stats["vertex_colors"], [])
                 self.assertEqual(stats["custom_attributes"], [])
+
+    def test_info_reports_bone_count_and_no_root_motion_on_a_real_character_mesh(self):
+        # fox.glb: 3 actions, each animating 20 of the armature's 24 bones via
+        # pose.bones["<name>"].<prop> fcurves, none of which ever key the root bone
+        # ("_rootJoint")'s own location -- these are in-place cycles meant to be driven
+        # externally, so root_motion must read False for all three, not just non-crash.
+        proc = run("info.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        animations = json.loads(proc.stdout)["animations"]
+        self.assertEqual(len(animations), 3)
+        for anim in animations:
+            self.assertEqual(anim["bone_count"], 20)
+            self.assertFalse(anim["root_motion"])
+
+    def test_info_detects_root_motion_on_a_synthetic_rig(self):
+        # root_motion_rig.blend: a 2-bone armature ("root" parented by nothing, "child" parented
+        # to "root") with two actions -- RootMotionWalk keyframes the root bone's own location
+        # (real root motion), InPlaceIdle only keyframes the child bone's rotation (an in-place
+        # pose, root_motion must stay False even though a bone is animated).
+        proc = run("info.py", str(ROOT_MOTION_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        animations = {a["name"]: a for a in json.loads(proc.stdout)["animations"]}
+        self.assertEqual(animations["RootMotionWalk"]["bone_count"], 2)
+        self.assertTrue(animations["RootMotionWalk"]["root_motion"])
+        self.assertEqual(animations["InPlaceIdle"]["bone_count"], 1)
+        self.assertFalse(animations["InPlaceIdle"]["root_motion"])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

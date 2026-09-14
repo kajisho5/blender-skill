@@ -4,6 +4,7 @@ This is the foundation every other script leans on (`inspect -> operate -> verif
 diffs two info() calls to validate a round-trip, check.py compares an info() result against a
 target's budget, optimize.py decides what needs shrinking from these same numbers.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -320,17 +321,50 @@ def _texture_info():
     return textures
 
 
+_BONE_FCURVE_RE = re.compile(r'pose\.bones\["([^"]+)"\]\.(\w+)')
+
+
+def _root_bone_names():
+    # A bone with no parent, in whichever armature(s) this file has -- bone names are assumed
+    # unique within a file, which glTF/FBX rigs exported from any DCC tool already require.
+    roots = set()
+    for obj in bpy.data.objects:
+        if obj.type == "ARMATURE":
+            for bone in obj.data.bones:
+                if bone.parent is None:
+                    roots.add(bone.name)
+    return roots
+
+
 def _animations(scene):
     fps = scene.render.fps / scene.render.fps_base if scene.render.fps_base else scene.render.fps
+    root_bones = _root_bone_names()
     out = []
     for action in bpy.data.actions:
         start, end = action.frame_range
+        bone_names = set()
+        root_motion = False
+        for fc in action.fcurves:
+            m = _BONE_FCURVE_RE.match(fc.data_path)
+            if not m:
+                continue
+            bone_name, prop = m.group(1), m.group(2)
+            bone_names.add(bone_name)
+            # Root motion == the root bone's own *location* channel actually moves (not just
+            # keyframed at a constant value) -- rotation/scale on the root, or motion on any
+            # non-root bone, isn't root motion, it's an in-place pose.
+            if prop == "location" and bone_name in root_bones and not root_motion:
+                values = [kp.co[1] for kp in fc.keyframe_points]
+                if values and (max(values) - min(values)) > 1e-5:
+                    root_motion = True
         out.append({
             "name": action.name,
             "frame_start": start,
             "frame_end": end,
             "fps": fps,
             "duration_seconds": (end - start) / fps if fps else None,
+            "bone_count": len(bone_names),
+            "root_motion": root_motion,
         })
     return out
 
