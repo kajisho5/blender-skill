@@ -31,14 +31,19 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 
 - **`info.py`** -- object/mesh/material/texture/animation/armature counts, unit scale, bounding
   box, non-manifold-edge and duplicate-vertex detection (computed on a welded scratch copy, so a
-  perfectly normal hard-edged/UV-seamed mesh isn't misreported as broken), UV presence.
+  perfectly normal hard-edged/UV-seamed mesh isn't misreported as broken), approximate
+  self-intersection detection, flipped-normal detection (only reported when trustworthy -- see
+  below), UV presence, each defect naming its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
-- **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, cap
-  texture resolution, purge orphan data; `--target-web`/`--target-mobile`/`--target-ar` presets;
-  `--draco`/`--meshopt`/`--ktx2` delegate to [gltf-transform](https://github.com/donmccurdy/glTF-Transform)
-  (and, for `--ktx2`, the [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI)
-  when installed, and say so and skip just that step when they aren't.
+- **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
+  boundary-edge holes (`--fill-holes`), cap texture resolution, purge orphan data;
+  `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
+  to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
+  [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
+  so and skip just that step when they aren't. `--recalc-normals` warns instead of silently
+  trusting its own output on a still-non-manifold mesh -- see `references/pitfalls.md`, this is a
+  real failure mode, not a hypothetical one.
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a

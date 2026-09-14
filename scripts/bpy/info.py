@@ -13,6 +13,70 @@ import _compat
 
 import bmesh
 import bpy
+from mathutils.bvhtree import BVHTree
+
+
+def _self_intersecting_faces(bm) -> int:
+    """Approximate count of face pairs that actually overlap in 3D space, not just at a shared
+    edge/vertex. BVHTree.overlap() reports every pair of triangles whose bounding boxes touch,
+    which includes every ordinary adjacent-face pair at a shared edge -- on a real asset with
+    split normals/UV seams (see the non-manifold note above), two triangles that share a
+    position are *different* vertex indices, so filtering "adjacent" by vertex *index* still
+    lets every hard edge/UV seam through as a false positive (confirmed: 115 false positives on
+    tests/fixtures/fox.glb using index comparison, 0 using position comparison). Filtering by
+    vertex *position* instead correctly drops those while still catching real overlaps (a second
+    cube pushed halfway into the first: 8 genuinely-intersecting triangle pairs, both ways of
+    filtering agree there). This is still an approximation -- true triangle-triangle intersection
+    is not computed, only bounding-box overlap between non-adjacent triangles -- so treat the
+    count as "worth a manual look", not an exact defect count.
+    """
+    bm2 = bm.copy()
+    bmesh.ops.triangulate(bm2, faces=bm2.faces[:])
+    bm2.faces.ensure_lookup_table()
+    tree = BVHTree.FromBMesh(bm2, epsilon=0.0)
+    bad_pairs = set()
+    for i1, i2 in tree.overlap(tree):
+        if i1 == i2:
+            continue
+        f1, f2 = bm2.faces[i1], bm2.faces[i2]
+        p1 = {v.co.to_tuple(5) for v in f1.verts}
+        p2 = {v.co.to_tuple(5) for v in f2.verts}
+        if p1 & p2:
+            continue
+        bad_pairs.add(tuple(sorted((i1, i2))))
+    bm2.free()
+    return len(bad_pairs)
+
+
+def _flipped_normal_faces(bm) -> int:
+    """How many faces' normals disagree with Blender's own "recalculate outside" pass on a
+    scratch copy. Confirmed reliable on a fully closed/manifold mesh: a cube with every face
+    normal manually inverted is flagged 6/6, an untouched cube 0/6, and a manifold sphere with a
+    hole cut in it (non-manifold boundary, but otherwise a single correctly-oriented shell) is
+    still correctly read as 0/118 -- holes alone don't confuse it.
+
+    It is NOT reliable once the mesh has non-manifold edges from something other than a simple
+    boundary hole (disconnected shells stitched only by non-manifold junctions, or genuinely
+    non-manifold geometry) -- confirmed on tests/fixtures/fox.glb (a real rigged character mesh,
+    1150 non-manifold edges): this same comparison flags 299 of 576 faces, and actually applying
+    optimize.py's --recalc-normals to "fix" them visibly corrupts the model's shading (turns a
+    cleanly-shaded render into a black/white patchwork -- verified by rendering before/after).
+    Blender's own bpy.ops.mesh.normals_make_consistent(inside=False) does the same thing to this
+    file, so this is not specific to the bmesh.ops call. The likely cause: recalc's "outside"
+    flood-fill is only well-defined per connected, closed shell, and this model's body parts
+    aren't all joined by shared manifold edges -- so the caller (_mesh_stats) only trusts this
+    function's result when the mesh has zero non-manifold edges.
+    """
+    bm2 = bm.copy()
+    bm2.normal_update()
+    before = [tuple(f.normal) for f in bm2.faces]
+    bmesh.ops.recalc_face_normals(bm2, faces=bm2.faces[:])
+    bm2.normal_update()
+    flipped = sum(
+        1 for a, b in zip(before, bm2.faces) if a[0] * b.normal[0] + a[1] * b.normal[1] + a[2] * b.normal[2] < 0
+    )
+    bm2.free()
+    return flipped
 
 
 def _mesh_stats(obj):
@@ -42,6 +106,14 @@ def _mesh_stats(obj):
     bmesh.ops.remove_doubles(bm_welded, verts=bm_welded.verts, dist=1e-6)
     duplicate_vertices = before - len(bm_welded.verts)
     non_manifold = sum(1 for e in bm_welded.edges if not e.is_manifold)
+    # Boundary edges specifically (exactly 1 face, the "hole" case) rather than every
+    # non-manifold edge (which also includes edges shared by 3+ faces, not fillable as a hole) --
+    # this is what optimize.py's --fill-holes acts on.
+    boundary_edges = sum(1 for e in bm_welded.edges if e.is_boundary)
+    self_intersecting = _self_intersecting_faces(bm)
+    # Only trust the flipped-normal comparison on an already-manifold mesh -- see
+    # _flipped_normal_faces' docstring for the real (not hypothetical) corruption this avoids.
+    flipped_normals = _flipped_normal_faces(bm) if non_manifold == 0 else None
     bm_welded.free()
     bm.free()
     uv_layers = len(obj.data.uv_layers)
@@ -50,6 +122,9 @@ def _mesh_stats(obj):
         "triangles": triangles,
         "vertices": vertex_count,
         "non_manifold_edges": non_manifold,
+        "boundary_edges": boundary_edges,
+        "self_intersecting_faces_approx": self_intersecting,
+        "flipped_normal_faces": flipped_normals,
         "duplicate_vertices": duplicate_vertices,
         "uv_maps": uv_layers,
         "has_uv": uv_layers > 0,
@@ -157,7 +232,15 @@ def run(args):
         warnings.append(f"missing texture file(s): {', '.join(missing_tex)}")
     for stats in per_object:
         if stats["non_manifold_edges"]:
-            warnings.append(f"{stats['name']}: {stats['non_manifold_edges']} non-manifold edge(s) (hole/gap in the surface, after welding split normals/UV seams)")
+            fix = ("try: optimize.py <file> -o <out> --fill-holes" if stats["boundary_edges"]
+                   else "no automatic fix for this shape of non-manifold edge (not a simple hole) -- needs manual cleanup")
+            warnings.append(f"{stats['name']}: {stats['non_manifold_edges']} non-manifold edge(s) (hole/gap in the surface, after welding split normals/UV seams) -- {fix}")
+        if stats["flipped_normal_faces"]:
+            warnings.append(f"{stats['name']}: {stats['flipped_normal_faces']} face(s) with a flipped/inward normal -- try: optimize.py <file> -o <out> --recalc-normals")
+        elif stats["flipped_normal_faces"] is None:
+            warnings.append(f"{stats['name']}: flipped-normal check skipped (unreliable while non-manifold edges are present -- fix those first, then re-run info.py)")
+        if stats["self_intersecting_faces_approx"]:
+            warnings.append(f"{stats['name']}: ~{stats['self_intersecting_faces_approx']} face pair(s) look self-intersecting (approximate, bounding-box based -- worth a manual look, no automatic fix)")
         if not stats["has_uv"]:
             warnings.append(f"{stats['name']}: no UV map")
         if stats["empty_material_slots"]:

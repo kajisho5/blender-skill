@@ -12,6 +12,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --decimate-ratio 0.5
   python3 scripts/optimize.py model.glb -o model_optimized.glb --target-mobile
   python3 scripts/optimize.py model.glb -o model_optimized.glb --weld-doubles --triangulate --purge-unused
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --fill-holes
   python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
   python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
 """
@@ -33,6 +34,7 @@ def main() -> int:
     ap.add_argument("input")
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--decimate-ratio", type=float, help="0-1, fraction of triangles to keep")
+    ap.add_argument("--fill-holes", action="store_true", help="fill boundary-edge holes/gaps (see info.py's non-manifold warning); does not touch non-manifold edges shared by 3+ faces")
     ap.add_argument("--weld-doubles", action="store_true", help="merge vertices at the same position (dist 1e-5)")
     ap.add_argument("--recalc-normals", action="store_true", help="recalculate outside-facing normals")
     ap.add_argument("--triangulate", action="store_true")
@@ -62,7 +64,7 @@ def main() -> int:
         bpy_args = {
             "path": str(in_path.resolve()), "format": in_fmt,
             "output": str(Path(args.out).resolve()), "output_format": out_fmt,
-            "decimate_ratio": args.decimate_ratio, "weld_doubles": args.weld_doubles,
+            "decimate_ratio": args.decimate_ratio, "fill_holes": args.fill_holes, "weld_doubles": args.weld_doubles,
             "recalc_normals": args.recalc_normals, "triangulate": args.triangulate,
             "texture_max": args.texture_max, "purge_unused": args.purge_unused,
             "target": args.target,
@@ -112,12 +114,16 @@ def main() -> int:
         print(f"  triangles: {data['triangles_before']} -> {data['triangles_after']} ({pct:.0f}% reduction)")
         if data["vertices_welded"]:
             print(f"  welded {data['vertices_welded']} duplicate vertices")
+        if data["holes_filled"]:
+            print(f"  filled {data['holes_filled']} hole(s)")
         for t in data["textures_resized"]:
             print(f"  texture {t['name']}: {t['from']} -> {t['to']}")
         if data["orphan_data_purged"]:
             print(f"  purged {data['orphan_data_purged']} orphan data block(s)")
         for d in data["delegated"]:
             print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
+        for w in data.get("warnings", []):
+            print(f"  warning: {w}")
     return 0
 
 
