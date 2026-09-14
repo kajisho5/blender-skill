@@ -235,6 +235,27 @@ extension, and Blender's default exporter doesn't add one. `tests/fixtures/verte
 (not a `.glb`) is the fixture for `custom_attributes`, specifically because the format needed to
 be one that actually preserves them.
 
+## Root motion means the root bone's own location channel moves, not "any bone is animated"
+
+`bpy.data.actions[].fcurves[].data_path` for a pose-bone channel matches
+`pose.bones["<name>"].<prop>`; the bone's *name* alone doesn't say whether it's a root -- that
+needs cross-referencing against the armature's own `bone.parent is None`. And a bone being
+animated at all is not root motion: fox.glb's 3 actions each animate 20 of 24 bones (confirmed
+real numbers) and correctly read `root_motion: False` for all three, because none of them ever
+keyframes the root bone's own `location` -- they're in-place cycles meant to be driven externally
+by a character controller. Root motion specifically means the root bone's `location` fcurve
+values actually vary (`max - min > 1e-5` across its keyframes, not just "has keyframes" -- a
+channel keyframed at a constant value is not motion). Verified against a synthetic 2-bone rig
+(`tests/fixtures/root_motion_rig.blend`) with one action keying the root's location (reads
+`root_motion: True`) and one keying only the child bone's rotation (reads `root_motion: False`
+despite being just as "animated").
+
+Building that fixture surfaced a separate, unrelated gotcha: an action assigned to
+`armature.animation_data.action = None` after creation has zero users and no fake user, so
+`bpy.data.actions` silently drops it by the time the file is saved and reloaded -- it must have
+`action.use_fake_user = True` set *before* unlinking it, or a test fixture meant to hold multiple
+actions on one armature will silently end up with only the most recently active one.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

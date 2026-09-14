@@ -71,8 +71,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   are data, not defects -- tiling textures and mirrored UV islands both use them deliberately;
   zero-area is a real "never actually unwrapped" defect), vertex color layers and other genuinely
   custom mesh attributes (Blender's own non-internal built-ins -- `position`, `material_index`,
-  bevel weight, crease -- are excluded), each defect naming its fix command where a safe one
-  exists.
+  bevel weight, crease -- are excluded), per-animation-clip bone count and root-motion detection
+  (whether the armature's own root bone's `location` channel actually moves, vs. an in-place
+  cycle meant to be driven by a character controller), each defect naming its fix command where a
+  safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
