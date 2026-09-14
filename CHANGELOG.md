@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.15.0...blender-skill-v0.16.0) (2026-09-14)
+
+
+### Features
+
+* **info,check:** ray-cast wall-thickness analysis for 3D printing (RM-019) ([#127](https://github.com/kajisho5/blender-skill/issues/127)) ([c7151b5](https://github.com/kajisho5/blender-skill/commit/c7151b5f9096503c07226647ec5fe0f58a3de03b))
+
 ## [0.15.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.14.0...blender-skill-v0.15.0) (2026-09-14)
 
 
