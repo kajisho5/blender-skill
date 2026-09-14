@@ -38,6 +38,7 @@ import _usdz_validate  # noqa: E402
 USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box.usdz"
 BROKEN_USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box_broken.usdz"
 PHONG_OBJ_FIXTURE = ROOT / "tests" / "fixtures" / "phong_materials.obj"
+THIN_WALL_STL_FIXTURE = ROOT / "tests" / "fixtures" / "thin_wall_box.stl"
 
 
 def _blender_available() -> bool:
@@ -467,6 +468,39 @@ class TestToolchain(unittest.TestCase):
         proc = run("info.py", str(FIXTURE), "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIsNone(json.loads(proc.stdout)["obj_materials"])
+
+    def test_info_detects_thin_wall_via_ray_cast_thickness(self):
+        # thin_wall_box.stl: a hollow cube (boolean-differenced) with a real 0.3-unit wall on
+        # every side -- ray-cast thickness analysis should read close to 0.3 (minus the small
+        # epsilon offset), not the outer box's 10-unit size.
+        proc = run("info.py", str(THIN_WALL_STL_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        stats = json.loads(proc.stdout)["meshes"]["per_object"][0]
+        self.assertLess(stats["wall_thickness_min"], 0.31)
+        self.assertGreater(stats["wall_thickness_min"], 0.29)
+
+    def test_info_reports_full_thickness_on_a_solid_mesh(self):
+        # box.glb: an ordinary solid cube -- a ray cast from any face should reach all the way
+        # to the opposite face, not read as "thin".
+        proc = run("info.py", str(FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        stats = json.loads(proc.stdout)["meshes"]["per_object"][0]
+        self.assertGreater(stats["wall_thickness_min"], 0.9)
+
+    def test_check_3d_print_target_flags_thin_walls(self):
+        out = self.out / "thin.stl"
+        proc = run("convert.py", str(THIN_WALL_STL_FIXTURE), "-o", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = run("check.py", str(out), "--target", "3d-print", "--json")
+        rows = {r["check"]: r for r in json.loads(proc.stdout)["checks"]}
+        self.assertEqual(rows["wall thickness"]["status"], "WARN")
+
+        thick_out = self.out / "thick.stl"
+        proc = run("convert.py", str(FIXTURE), "-o", str(thick_out))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = run("check.py", str(thick_out), "--target", "3d-print", "--json")
+        rows = {r["check"]: r for r in json.loads(proc.stdout)["checks"]}
+        self.assertEqual(rows["wall thickness"]["status"], "PASS")
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

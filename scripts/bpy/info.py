@@ -265,6 +265,39 @@ def _draw_call_estimate(obj) -> int:
     return len({p.material_index for p in obj.data.polygons})
 
 
+def _wall_thickness_min(bm, sample_limit=2000):
+    """Local wall thickness at a sample of faces: ray-cast from each face's center along its own
+    negative normal (offset by a small epsilon to avoid immediately self-hitting the origin
+    face) and take the hit distance to the nearest opposing surface -- the same "thickness
+    analysis" technique Blender's own 3D-Print Toolbox (an Extension as of 4.2+, not bundled, so
+    not something this skill can assume is installed) uses. Returns None if not a single face
+    got a hit (an open/non-manifold shape with no "inside" for a ray to reach), otherwise the
+    minimum distance found across the sampled faces -- in the mesh's own local units, since STL
+    (this check's real target) carries no unit information at all; check.py's 3d-print target
+    interprets this against its own assumed-millimeters budget.
+
+    Sampled (evenly strided), not exhaustive, on a mesh with more than `sample_limit` faces --
+    confirmed fast enough not to need this at all on real test assets (576 triangles in ~3ms),
+    but a red-flag signal on a dense real-world mesh should stay bounded rather than ray-casting
+    every single face.
+    """
+    faces = bm.faces[:]
+    if not faces:
+        return None
+    stride = max(1, len(faces) // sample_limit)
+    bvh = BVHTree.FromBMesh(bm)
+    epsilon = 1e-4
+    min_thickness = None
+    for face in faces[::stride]:
+        origin = face.calc_center_median() - face.normal * epsilon
+        hit = bvh.ray_cast(origin, -face.normal)
+        if hit[0] is not None:
+            dist = hit[3]
+            if min_thickness is None or dist < min_thickness:
+                min_thickness = dist
+    return min_thickness
+
+
 def _mesh_stats(obj):
     """Triangle/vertex counts and UV layer count as-imported (never modifies the mesh -- info.py
     only reads), plus two checks computed on a *welded* scratch copy:
@@ -301,6 +334,8 @@ def _mesh_stats(obj):
     # _flipped_normal_faces' docstring for the real (not hypothetical) corruption this avoids.
     flipped_normals = _flipped_normal_faces(bm) if non_manifold == 0 else None
     uv_checks = _uv_checks(bm)
+    bm.normal_update()
+    wall_thickness_min = _wall_thickness_min(bm)
     bm_welded.free()
     bm.free()
     uv_layers = len(obj.data.uv_layers)
@@ -328,6 +363,7 @@ def _mesh_stats(obj):
         "custom_attributes": custom_attributes,
         "unweighted_vertices": unweighted_vertices,
         "draw_calls_estimate": draw_calls_estimate,
+        "wall_thickness_min": wall_thickness_min,
     }
 
 

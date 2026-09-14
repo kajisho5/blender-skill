@@ -380,6 +380,21 @@ claim. Confirmed end-to-end too: converting a `.obj`/`.mtl` fixture through `con
 formula exactly -- the heuristic `info.py` reports isn't just a formula in isolation, it's what
 this skill's own pipeline actually produces.
 
+## Blender's "3D-Print Toolbox" is no longer bundled as of 4.2
+
+Confirmed via `addon_utils.modules()` on real 4.2.23 with `--factory-startup`: only 14 add-ons
+are discoverable at all (fbx/gltf/svg/bvh importers, Cycles, Rigify, Node Wrangler, ...) --
+`object_print3d_utils` ("3D-Print Toolbox"), the add-on that historically shipped the exact
+"per-face thickness via ray-casting" analysis RM-019 needed, isn't among them. Blender 4.2 moved
+many formerly-bundled add-ons to the separately-installable Extensions platform
+(extensions.blender.org), which this skill's no-cloud/no-extra-install constraint rules out
+depending on. Implemented the same ray-cast-thickness technique directly instead (`info.py`'s
+`wall_thickness_min`): cast a ray from each face's center along its own negative normal, take the
+hit distance to the nearest opposing surface. Verified against a real boolean-differenced
+hollow cube with a deliberate 0.3-unit wall (reads ~0.2999, matching to within the ray's small
+origin-offset epsilon) and a solid cube (reads ~9.9999 for a size-10 cube -- the full
+face-to-opposite-face distance, not a false "thin" reading).
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

@@ -109,6 +109,22 @@ def _check(info: dict, target: str) -> list:
         else:
             rows.append({"check": "manifold", "status": "PASS", "detail": "no non-manifold edges"})
 
+    if target == "3d-print":
+        # STL (this target's main format) carries no unit information at all -- by
+        # near-universal slicer convention the raw numbers are millimeters, so this tool's own
+        # conservative default budget (0.8mm, a commonly-cited FDM minimum for a structurally
+        # sound wall) is applied directly against wall_thickness_min in the file's own units.
+        min_wall_mm = 0.8
+        thin = [(o["name"], o["wall_thickness_min"]) for o in info["meshes"]["per_object"]
+                if o["wall_thickness_min"] is not None and o["wall_thickness_min"] < min_wall_mm]
+        if thin:
+            detail = ", ".join(f"{name} ({thickness:.2f}mm)" for name, thickness in thin)
+            rows.append({"check": "wall thickness", "status": "WARN",
+                         "detail": f"below {min_wall_mm}mm (assuming the file's units are mm, the standard STL convention): {detail}",
+                         "fix": "thicken the affected walls in Blender or a dedicated repair tool; not automated by this skill yet"})
+        else:
+            rows.append({"check": "wall thickness", "status": "PASS", "detail": f"no sampled face under {min_wall_mm}mm (assuming mm units)"})
+
     if fmt == "usdz":
         usdz = _usdz_validate.validate(info["file"])
         if usdz is None:
