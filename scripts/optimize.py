@@ -44,6 +44,7 @@ def main() -> int:
     ap.add_argument("--triangulate", action="store_true")
     ap.add_argument("--texture-max", type=int, metavar="PX", help="downscale any texture wider/taller than this")
     ap.add_argument("--purge-unused", action="store_true", help="remove orphan data blocks (unused meshes/materials/images/actions) after other operations")
+    ap.add_argument("--point-thin-voxel", type=float, metavar="SIZE", help="thin a point cloud (a vertices-only mesh, e.g. from PLY scan data) by voxel-grid downsampling: keep one point per SIZE-sized grid cell. No-op on any mesh that has faces -- use --decimate-ratio for those.")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -72,6 +73,7 @@ def main() -> int:
             "recalc_normals": args.recalc_normals, "triangulate": args.triangulate,
             "texture_max": args.texture_max, "purge_unused": args.purge_unused,
             "target": args.target, "fix_scale": args.fix_scale, "origin": args.origin,
+            "point_thin_voxel": args.point_thin_voxel,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -122,6 +124,8 @@ def main() -> int:
             print(f"  filled {data['holes_filled']} hole(s)")
         if data["scales_fixed"]:
             print(f"  applied scale on {data['scales_fixed']} object(s)")
+        if data["points_thinned"]:
+            print(f"  thinned {data['points_thinned']} point(s) from the point cloud")
         for t in data["textures_resized"]:
             print(f"  texture {t['name']}: {t['from']} -> {t['to']}")
         if data["orphan_data_purged"]:

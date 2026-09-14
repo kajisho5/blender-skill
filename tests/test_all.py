@@ -39,6 +39,7 @@ USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box.usdz"
 BROKEN_USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box_broken.usdz"
 PHONG_OBJ_FIXTURE = ROOT / "tests" / "fixtures" / "phong_materials.obj"
 THIN_WALL_STL_FIXTURE = ROOT / "tests" / "fixtures" / "thin_wall_box.stl"
+POINT_CLOUD_FIXTURE = ROOT / "tests" / "fixtures" / "points.ply"
 
 
 def _blender_available() -> bool:
@@ -501,6 +502,45 @@ class TestToolchain(unittest.TestCase):
         proc = run("check.py", str(thick_out), "--target", "3d-print", "--json")
         rows = {r["check"]: r for r in json.loads(proc.stdout)["checks"]}
         self.assertEqual(rows["wall thickness"]["status"], "PASS")
+
+    def test_info_detects_a_pure_point_cloud_and_skips_its_uv_warning(self):
+        # points.ply: 1000 vertices, 0 faces at all (real photogrammetry/LiDAR-style data) --
+        # is_point_cloud must read True, and the usual "no UV map" warning (meaningless for a
+        # point cloud) must not fire.
+        proc = run("info.py", str(POINT_CLOUD_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        stats = data["meshes"]["per_object"][0]
+        self.assertEqual(stats["vertices"], 1000)
+        self.assertEqual(stats["triangles"], 0)
+        self.assertTrue(stats["is_point_cloud"])
+        self.assertFalse(any("no UV map" in w for w in data["warnings"]))
+
+    def test_info_reports_false_is_point_cloud_on_an_ordinary_mesh(self):
+        proc = run("info.py", str(FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertFalse(json.loads(proc.stdout)["meshes"]["per_object"][0]["is_point_cloud"])
+
+    def test_optimize_point_thin_voxel_reduces_point_cloud_density(self):
+        out = self.out / "points_thin.ply"
+        proc = run("optimize.py", str(POINT_CLOUD_FIXTURE), "-o", str(out), "--point-thin-voxel", "1.0", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertGreater(data["points_thinned"], 0)
+        proc = run("info.py", str(out), "--json")
+        remaining = json.loads(proc.stdout)["meshes"]["per_object"][0]["vertices"]
+        self.assertEqual(remaining, 1000 - data["points_thinned"])
+        self.assertLess(remaining, 1000)
+
+    def test_optimize_point_thin_voxel_is_a_noop_on_a_real_mesh(self):
+        # A mesh with actual faces isn't a point cloud -- --point-thin-voxel must leave its
+        # vertex count untouched (--decimate-ratio is the tool for that case).
+        out = self.out / "box_thin.glb"
+        proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--point-thin-voxel", "1.0", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["points_thinned"], 0)
+        proc = run("info.py", str(out), "--json")
+        self.assertEqual(json.loads(proc.stdout)["meshes"]["per_object"][0]["vertices"], 24)
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
