@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.13.0...blender-skill-v0.14.0) (2026-09-14)
+
+
+### Features
+
+* **check:** validate USDZ package structure for iOS Quick Look (RM-016) ([#123](https://github.com/kajisho5/blender-skill/issues/123)) ([8837463](https://github.com/kajisho5/blender-skill/commit/8837463befe44e3463fc96ff0817209b8d8b6208))
+
 ## [0.13.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.12.0...blender-skill-v0.13.0) (2026-09-14)
 
 
