@@ -67,7 +67,7 @@ jobs:
 
       - name: Cache Blender
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: blender-install
           key: blender-${{ steps.ver.outputs.version }}-${{ runner.os }}
@@ -160,7 +160,7 @@ jobs:
 
       - name: Cache Blender
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: blender-install
           key: blender-${{ steps.ver.outputs.version }}-Linux
