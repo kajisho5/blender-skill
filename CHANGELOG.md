@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.16.0...blender-skill-v0.17.0) (2026-09-14)
+
+
+### Features
+
+* **info,optimize:** PLY point cloud detection and voxel thinning (RM-021) ([#129](https://github.com/kajisho5/blender-skill/issues/129)) ([e613a0f](https://github.com/kajisho5/blender-skill/commit/e613a0f7337a868e273de2d67f550a157aa666a8))
+
 ## [0.16.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.15.0...blender-skill-v0.16.0) (2026-09-14)
 
 
