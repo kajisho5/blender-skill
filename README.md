@@ -110,6 +110,13 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 - **`split.py`** -- split one multi-object file into one output file per independent object
   hierarchy (a root object with no parent, plus every descendant), so a skinned mesh stays with
   its armature while an unrelated standalone object becomes its own file.
+- **`lod.py`** -- batch-generate LOD0 (unmodified original) through LOD3 in one call, one output
+  file per level, at either the default ratios matching `info.py`'s own LOD1/2/3 suggestions
+  (50%/25%/10%) or an absolute `--target-triangles` for LOD1 (LOD2/LOD3 auto-scale to keep the
+  same halving relationship). Strips Blender's own synthesized bone-shape display widget after
+  import first (see `references/pitfalls.md`) -- otherwise a skinned character's reported
+  triangle counts are inflated by the widget's own triangles, and every level needlessly
+  decimates it too.
 - **`anim.py`** -- `--extract` strips every non-armature object, keeping just the skeleton and
   its actions (an animation-only file); `--combine` merges several files' actions (matched by
   bone name) onto one base character into a single output with every action as its own
@@ -177,6 +184,7 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 | `convert.py` | Cross-format conversion, with round-trip `--verify` |
 | `split.py` | Split a multi-object file into one file per independent object hierarchy |
 | `anim.py` | Extract animation-only data, or combine several files' actions (Mixamo workflow) |
+| `lod.py` | Batch-generate LOD0-3 files at decreasing triangle counts |
 | `optimize.py` | Decimate, weld, triangulate, cap texture size, purge unused, Draco/Meshopt/KTX2 (delegated) |
 | `render.py` | Thumbnail, turntable, 4-view sheet |
 | `look.py` | Wireframe, texture grid, before/after compare, UV layout |

@@ -535,3 +535,22 @@ colorspace_settings.name` accepts `ACES2065-1` and `ACEScg` alongside `sRGB`/`No
 (confirmed via the property's own real enum). So `--texture-colorspace ACEScg` is a real, working
 command -- it just tags textures for an ACES-aware shading setup, not a claim that this skill can
 render through a full ACES view transform, which it honestly can't without an extra install.
+
+## The synthesized bone-shape widget inflates triangle counts wherever it isn't stripped
+
+`lod.py` (RM-031) hit a lighter version of the same defect `split.py` (RM-027) found: Blender's
+own synthesized bone custom-shape widget (see the earlier "fox.glb's 'Icosphere'..." entry) got
+counted as real triangles on any skinned-armature input, since `lod.py`'s import path didn't
+call `_compat.strip_import_helper_objects()`. On fox.glb the reported "original" triangle count
+was 656 (576 real + the widget's own 80) instead of 576, and every LOD level's Decimate modifier
+ran against it too -- wasted work, since it's a tiny object either way. Checked directly (by
+temporarily disabling the strip and reading each output's raw glTF JSON): the *exported files*
+were not actually contaminated even without the strip -- Blender's own whole-scene export
+already excludes anything in the "glTF_not_exported" collection the widget lives in, unlike the
+*selection*-based export `split.py` uses, which is what made RM-027's version a real deliverable
+bug rather than just a reporting one. `optimize.py`'s existing `--decimate-ratio` has this same
+lighter version today (confirmed: `triangles_before`/`triangles_after` for fox.glb are inflated
+by the same 80, though its output file is unaffected for the same whole-scene-export reason) --
+not fixed here, since it's a pre-existing, separately-shipped script and out of scope for this
+change, but worth knowing before trusting either script's reported counts on a skinned-armature
+glTF input right down to the exact triangle.

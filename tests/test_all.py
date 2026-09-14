@@ -613,6 +613,57 @@ class TestToolchain(unittest.TestCase):
         proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "misconfigured_colorspace.blend"), "-o", str(out), "--fix-colorspace", "--texture-colorspace", "sRGB")
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_lod_default_ratios_match_info_pys_own_suggestions(self):
+        # box.glb: 12 triangles. Default ratios (0.5, 0.25, 0.1) match info.py's own LOD1/2/3
+        # suggestion ladder (RM-010) -- LOD0 is always an unmodified copy at full detail.
+        out_dir = self.out / "lod_default"
+        proc = run("lod.py", str(FIXTURE), "--out-dir", str(out_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_original"], 12)
+        levels = {lvl["name"]: lvl for lvl in data["levels"]}
+        self.assertEqual(set(levels), {"LOD0", "LOD1", "LOD2", "LOD3"})
+        self.assertEqual(levels["LOD0"]["triangles_after"], 12)
+        self.assertLessEqual(levels["LOD1"]["triangles_after"], 12)
+        self.assertLessEqual(levels["LOD2"]["triangles_after"], levels["LOD1"]["triangles_after"])
+        self.assertLessEqual(levels["LOD3"]["triangles_after"], levels["LOD2"]["triangles_after"])
+        for lvl in data["levels"]:
+            self.assertTrue(Path(lvl["output"]).exists())
+
+    def test_lod_target_triangles_scales_lod1_and_halves_the_rest(self):
+        out_dir = self.out / "lod_target"
+        proc = run("lod.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--target-triangles", "200", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        levels = {lvl["name"]: lvl for lvl in data["levels"]}
+        # ratio1 = 200 / triangles_original (576, the real "fox" mesh -- the synthesized
+        # bone-shape widget must not be counted, see references/pitfalls.md's RM-027 entry).
+        self.assertEqual(data["triangles_original"], 576)
+        self.assertAlmostEqual(levels["LOD1"]["ratio"], 200 / 576, places=4)
+        self.assertAlmostEqual(levels["LOD2"]["ratio"], levels["LOD1"]["ratio"] / 2, places=6)
+        self.assertAlmostEqual(levels["LOD3"]["ratio"], levels["LOD1"]["ratio"] / 4, places=6)
+
+    def test_lod_outputs_never_leak_the_synthesized_bone_shape_widget(self):
+        # fox.glb's synthetic "Icosphere" bone custom-shape widget (see references/pitfalls.md)
+        # must never appear in a LOD output's own mesh list -- confirmed real, not just a
+        # reporting artifact from Blender's own whole-scene export already excluding it.
+        out_dir = self.out / "lod_no_widget"
+        proc = run("lod.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        import struct as _struct
+        for lvl in data["levels"]:
+            with open(lvl["output"], "rb") as f:
+                f.read(12)
+                chunk_len, _chunk_type = _struct.unpack("<II", f.read(8))
+                gltf = json.loads(f.read(chunk_len))
+            self.assertEqual([m["name"] for m in gltf.get("meshes", [])], ["fox1"])
+
+    def test_lod_rejects_malformed_ratios(self):
+        out_dir = self.out / "lod_bad_ratios"
+        proc = run("lod.py", str(FIXTURE), "--out-dir", str(out_dir), "--ratios", "0.6,0.3")
+        self.assertNotEqual(proc.returncode, 0)
+
     def test_split_separates_independent_hierarchies(self):
         # two_props.glb: PropA and PropB, two plain cubes with no parent relationship at all --
         # each must become its own group.

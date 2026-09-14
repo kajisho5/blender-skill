@@ -41,7 +41,7 @@ what v0.1.0 actually does.
 | RM-028 | convert | アニメーションだけを別ファイルに分離/結合（Mixamo系ワークフロー） | done | #22 |
 | RM-029 | convert | 座標系変換（Y-up/Z-up、左手/右手）明示指定 | done | #23 |
 | RM-030 | convert | カラースペース変換（sRGB/Linear/ACES）の明示 | done | #24 |
-| RM-031 | optimize | 目標三角数指定でLOD0-3を一括生成 | planned | #25 |
+| RM-031 | optimize | 目標三角数指定でLOD0-3を一括生成 | done | #25 |
 | RM-032 | optimize | テクスチャアトラス化（複数マテリアル→1枚） | done | |
 | RM-033 | optimize | テクスチャ解像度の自動決定（画面占有率ベース） | planned | #26 |
 | RM-034 | optimize | 未使用ボーン削除・ボーン数上限（モバイル向け） | planned | #27 |
