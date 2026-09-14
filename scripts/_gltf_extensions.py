@@ -62,6 +62,38 @@ def _read_glb_json_chunk(path: Path) -> Optional[dict]:
         return json.loads(f.read(chunk_len))
 
 
+def total_image_bytes(path: str) -> Optional[int]:
+    """Sum of every embedded image's byte size in a .glb/.gltf, read from the file's own JSON --
+    used to report a real before/after size when converting texture format (e.g. --webp), since
+    a format conversion's actual effect on size must be measured, not assumed (confirmed: WebP at
+    Blender's own default quality (75) can be *larger* than a well-compressed PNG for some
+    textures -- see references/pitfalls.md). Only counts embedded (bufferView-referenced) images;
+    an external image path in .gltf (non-binary) mode is not resolved here. None if the file
+    can't be parsed at all or has no images.
+    """
+    p = Path(path)
+    try:
+        if p.suffix.lower() == ".glb":
+            gltf = _read_glb_json_chunk(p)
+        else:
+            gltf = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError, struct.error):
+        gltf = None
+    if not isinstance(gltf, dict):
+        return None
+    images = gltf.get("images") or []
+    if not images:
+        return None
+    buffer_views = gltf.get("bufferViews") or []
+    total = 0
+    for img in images:
+        bv_index = img.get("bufferView")
+        if bv_index is None or bv_index >= len(buffer_views):
+            continue
+        total += buffer_views[bv_index].get("byteLength", 0)
+    return total
+
+
 def read_extensions(path: str) -> dict:
     """Returns {"used": [...], "required": [...], "descriptions": {name: text-or-None}} for a
     .gltf/.glb file, sorted for stable output. Any parse failure (malformed file, unexpected

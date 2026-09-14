@@ -395,6 +395,24 @@ hollow cube with a deliberate 0.3-unit wall (reads ~0.2999, matching to within t
 origin-offset epsilon) and a solid cube (reads ~9.9999 for a size-10 cube -- the full
 face-to-opposite-face distance, not a false "thin" reading).
 
+## WebP is not always smaller than the PNG it replaces
+
+`optimize.py --webp` (RM-024) converts textures via Blender's own glTF exporter
+(`export_image_format='WEBP'`, which adds `EXT_texture_webp`) -- a real, native capability, no
+external tool involved. But confirmed on a real asset, in a fair controlled A/B (same import,
+same export call, only `export_image_format` differing): fox.glb's one PNG texture is 26764
+bytes; the same texture re-encoded as WebP at Blender's own default quality (75) is **30060
+bytes** -- larger, not smaller. This isn't a fluke of an unfair comparison (an earlier, naive
+before/after used the committed `fox.glb` as "before" and a fresh full re-export as "after",
+which conflated the format change with ~39KB of unrelated JSON-chunk differences between however
+the original fixture was produced and this Blender version's own export defaults -- redone as a
+true A/B once that discrepancy surfaced). Lowering `--webp-quality` (e.g. to 30) does shrink it
+below the original (19530 bytes) -- so the tool works correctly, it just isn't a guaranteed win
+at default settings for every texture, especially a small/already-well-compressed one. `optimize.
+py --webp` reports the real measured `texture_bytes_before`/`texture_bytes_after` (read directly
+from each file's own glTF JSON, `scripts/_gltf_extensions.py`'s `total_image_bytes`) rather than
+claiming a reduction happened.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in
