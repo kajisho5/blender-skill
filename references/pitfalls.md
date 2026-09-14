@@ -211,6 +211,30 @@ a fully duplicated/stacked UV island (all 3 vertices coincide, the most severe o
 as "adjacent" and misses it completely; confirmed both ways on a synthetic stacked-UV fixture (0
 detected with the bug, the correct 12 once fixed).
 
+## Custom mesh attributes are not just the ones on `Mesh.attributes` that look custom
+
+`Mesh.attributes` includes plenty of entries Blender itself creates that a user never added --
+and their `is_internal` property, which correctly flags the dot-prefixed bookkeeping ones
+(`.corner_vert`, `.select_edge`, ...) as internal, is `False` for several more of Blender's own
+built-ins: `position` (every mesh has this), `sharp_face`, `UVMap` (one per UV layer, already
+reported via `uv_maps`), and, confirmed by actually adding them via ordinary edit-mode operators,
+`material_index` (second material slot used), `bevel_weight_edge`/`crease_edge` (edge bevel
+weight/crease set on any edge). `info.py`'s `custom_attributes` excludes `is_internal` attributes
+*and* a known-name set of these non-internal built-ins, confirmed against a real cube with two
+materials, a bevel weight, a crease, one vertex color layer and two real custom attributes: only
+the two real ones are reported, matching zero for `tests/fixtures/box.glb`/`fox.glb` (neither has
+any).
+
+## glTF round-trips vertex colors but drops generic custom mesh attributes entirely
+
+Exporting a cube with a vertex color layer *and* two arbitrary custom attributes (a per-vertex
+float, a per-face int) to glb and re-importing keeps the vertex color (renamed `Col` -> `Color`,
+following glTF's own `COLOR_0` convention) but the two custom attributes are simply gone --
+glTF has no generic concept of an arbitrary named custom mesh attribute without a vendor
+extension, and Blender's default exporter doesn't add one. `tests/fixtures/vertex_colors_cube.blend`
+(not a `.glb`) is the fixture for `custom_attributes`, specifically because the format needed to
+be one that actually preserves them.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in
