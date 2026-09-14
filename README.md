@@ -80,9 +80,12 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   `optimize.py --decimate-ratio` command for each -- a starting-point estimate, not a guarantee),
   a draw-call estimate (one per distinct material a mesh object's faces actually use, not the
   cruder "material count x object count" that overestimates as soon as objects share a material),
-  and misconfigured-transparency detection (a hard binary-alpha mask, e.g. foliage, using real
-  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), each defect naming
-  its fix command where a safe one exists.
+  misconfigured-transparency detection (a hard binary-alpha mask, e.g. foliage, using real
+  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), and (glb/gltf only)
+  the file's own `extensionsUsed`/`extensionsRequired` list read straight from its JSON -- with a
+  short description per known `KHR_*`/`EXT_*` extension -- since Blender's importer translates
+  those into its own representation and doesn't expose which ones the source file declared, each
+  defect naming its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill

@@ -334,6 +334,20 @@ issues` read `[]` even on `misconfigured_transparency.blend`'s deliberately-brok
 fixed by reading `image.pixels[:]` first (forcing the decode) and only then checking `has_data`/
 `size`.
 
+## Blender's glTF importer doesn't expose which KHR_*/EXT_* extensions a file declared
+
+`extensionsUsed`/`extensionsRequired` are top-level fields in a glTF file's own JSON -- Blender's
+importer reads and *applies* them (Draco-compressed meshes decode transparently, `KHR_materials_
+unlit` becomes a shadeless material node setup, etc.) but there is no `bpy` property anywhere
+that lists which extensions the source file actually declared; by the time the scene is built,
+that information is gone. RM-014's `gltf_extensions` is read directly from the file's own JSON
+instead -- for `.glb`, by parsing the 12-byte binary header and the first ('JSON'-type) chunk by
+hand (`struct`, stdlib only); for `.gltf`, just `json.loads()` the file -- entirely independent
+of Blender, in the host script (`scripts/_gltf_extensions.py`), not `scripts/bpy/info.py`.
+Verified against a real Draco-compressed export (`optimize.py --draco` on `box.glb`, confirmed
+`extensionsUsed == extensionsRequired == ['KHR_draco_mesh_compression']`) and against fox.glb/
+box.glb (both `[]`, no false positives).
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in
