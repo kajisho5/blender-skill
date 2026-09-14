@@ -33,7 +33,8 @@ def run(args):
     before = info_mod.run({"path": args["input"], "format": args["input_format"]})
     # The scene from info_mod.run()'s import is still loaded -- export it directly rather than
     # reloading, so the exported file is exactly what was just measured.
-    _compat.export_file(args["output"], args["output_format"])
+    axis_kwargs = _compat.axis_export_kwargs(args["output_format"], args.get("forward_axis"), args.get("up_axis"))
+    _compat.export_file(args["output"], args["output_format"], **axis_kwargs)
     result = {"input": before, "output_path": args["output"]}
     if args.get("verify"):
         after = info_mod.run({"path": args["output"], "format": args["output_format"]})

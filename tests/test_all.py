@@ -675,6 +675,57 @@ class TestToolchain(unittest.TestCase):
         )
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_convert_up_axis_reorients_the_output_geometry(self):
+        # tall_cube.blend: a cube at Blender-native location (0, 0, 5) -- native format, so no
+        # importer axis-convention ambiguity to confound the check (unlike OBJ, whose own
+        # default import/export axes are its traditional Y-up/-Z-forward convention, not
+        # Blender's; see references/pitfalls.md). Default glTF export (up=Y) must move that
+        # world position into the Y column; --up-axis Z must keep it in the Z column.
+        fixture = ROOT / "tests" / "fixtures" / "tall_cube.blend"
+        default_out = self.out / "default_up.glb"
+        proc = run("convert.py", str(fixture), "-o", str(default_out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        z_out = self.out / "z_up.glb"
+        proc = run("convert.py", str(fixture), "-o", str(z_out), "--up-axis", "Z", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        import struct as _struct
+
+        def node_translation(path):
+            with open(path, "rb") as f:
+                f.read(12)
+                chunk_len, _chunk_type = _struct.unpack("<II", f.read(8))
+                gltf = json.loads(f.read(chunk_len))
+            return gltf["nodes"][0]["translation"]
+
+        self.assertEqual(node_translation(default_out), [0, 5, 0])  # glTF's mandatory Y-up
+        self.assertEqual(node_translation(z_out), [0, 0, 5])  # Blender's own native Z-up, kept
+
+    def test_convert_up_axis_rejects_unsupported_format_and_axis_combinations(self):
+        fixture = ROOT / "tests" / "fixtures" / "tall_cube.blend"
+        # ABC/.blend have no axis-orientation control in Blender at all.
+        proc = run("convert.py", str(fixture), "-o", str(self.out / "x.abc"), "--up-axis", "Z", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+        # glTF has no forward-axis control, and only accepts up-axis Y or Z (its spec is fixed Y-up).
+        proc = run("convert.py", str(fixture), "-o", str(self.out / "x.glb"), "--forward-axis", "X", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+        proc = run("convert.py", str(fixture), "-o", str(self.out / "x2.glb"), "--up-axis", "X", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_convert_up_axis_applies_to_usd_via_a_root_transform(self):
+        # USD needs convert_orientation=True as a master switch alongside its own up/forward
+        # selection (confirmed: without it, the selection is accepted but has no effect) --
+        # applied as a single root Xform wrapper's rotation, not per-object; verified directly
+        # against the exported file's own raw text (upAxis stage metadata + a rotateXYZ on the
+        # root prim), not through Blender's own reimport.
+        fixture = ROOT / "tests" / "fixtures" / "tall_cube.blend"
+        out = self.out / "axis.usda"
+        proc = run("convert.py", str(fixture), "-o", str(out), "--up-axis", "Z", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        content = out.read_text()
+        self.assertIn('upAxis = "Z"', content)
+        self.assertIn("xformOp:rotateXYZ", content)
+
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
         # exactly. STL has no index buffer at all (every triangle stores 3 independent

@@ -134,6 +134,78 @@ def strip_import_helper_objects() -> list:
     return removed
 
 
+# format -> (forward-axis param name, up-axis param name, enum value spelling) for the export
+# operator's own axis-orientation control. Confirmed against each operator's own bl_rna on real
+# Blender 4.2.23; "sign" spells a negative axis "-X" (FBX only), "word" spells it "NEGATIVE_X"
+# (OBJ/STL/PLY -- and USD, handled separately below since it also needs a second switch). glTF
+# and ABC/.blend have no entry here; they're handled/rejected in axis_export_kwargs directly.
+# Geometry-level correctness (not just that the kwarg is accepted) confirmed by exporting the
+# same off-axis point with an identity axis request vs. a real Z-up -> Y-up request and reading
+# the raw output file's own vertex coordinates directly: OBJ and STL both moved the coordinate
+# from the Z column to the Y column as requested (see references/pitfalls.md). FBX and PLY use
+# this exact same parameter convention (and, per Blender's own source, the same underlying
+# bpy_extras.io_utils.axis_conversion() utility as OBJ/STL) but round-trip through Blender's own
+# FBX importer too smoothly (it reads the file's own embedded axis metadata) to demonstrate the
+# same way; trusted by shared mechanism, not independently re-derived per format.
+_AXIS_PARAMS = {
+    "fbx": ("axis_forward", "axis_up", "sign"),
+    "obj": ("forward_axis", "up_axis", "word"),
+    "stl": ("forward_axis", "up_axis", "word"),
+    "ply": ("forward_axis", "up_axis", "word"),
+}
+
+_AXIS_WORD = {"X": "X", "Y": "Y", "Z": "Z", "-X": "NEGATIVE_X", "-Y": "NEGATIVE_Y", "-Z": "NEGATIVE_Z"}
+
+
+def axis_export_kwargs(fmt: str, forward: str = None, up: str = None) -> dict:
+    """Translate a forward/up axis request -- Blender's own sign-prefixed vocabulary: 'X', 'Y',
+    'Z', '-X', '-Y', '-Z' -- into the given format's own export kwargs. Raises ValueError for a
+    format/axis combination with no real control in Blender, rather than silently dropping a
+    requested axis conversion:
+      - glTF only has an up-axis Y/Z toggle (export_yup) and no forward-axis control at all --
+        the glTF spec itself is fixed Y-up, so Z is a deliberate non-compliant escape hatch and
+        anything else is rejected.
+      - USD needs convert_orientation=True as a master switch alongside its own selections
+        (confirmed: without it, the up/forward selection is accepted but has no effect on the
+        exported file -- see references/pitfalls.md); its export applies the rotation as a
+        single root Xform wrapper, not per-object, confirmed against the file's own raw text.
+      - ABC and .blend have no axis-orientation control in Blender's operators at all.
+
+    This only controls the EXPORT step -- the current in-scene geometry (however it got there)
+    is reoriented to the requested convention, regardless of what format it was imported from.
+    Note OBJ's own import/export default (confirmed: forward=NEGATIVE_Z, up=Y) is OBJ's
+    traditional Y-up/-Z-forward convention, not Blender's own native axes -- passing no forward/
+    up request at all still round-trips correctly through this skill's own OBJ<->OBJ (or any
+    other format) conversions, since Blender's OBJ importer and exporter share that same
+    default; it only becomes visible if code elsewhere requests one side's axes explicitly
+    without matching it on the other.
+    """
+    if forward is None and up is None:
+        return {}
+    if fmt == "gltf":
+        if forward is not None:
+            raise ValueError("glTF's exporter has no forward-axis control, only up-axis Y or Z")
+        if up not in ("Y", "Z"):
+            raise ValueError(f"glTF's exporter only supports up-axis Y or Z (the glTF spec itself is fixed Y-up; Z is a non-compliant escape hatch) -- got {up!r}")
+        return {"export_yup": up == "Y"}
+    if fmt in ("usd", "usdz"):
+        kwargs = {"convert_orientation": True}
+        if forward is not None:
+            kwargs["export_global_forward_selection"] = _AXIS_WORD[forward]
+        if up is not None:
+            kwargs["export_global_up_selection"] = _AXIS_WORD[up]
+        return kwargs
+    if fmt not in _AXIS_PARAMS:
+        raise ValueError(f"{fmt!r} has no axis-orientation export control in Blender")
+    forward_param, up_param, style = _AXIS_PARAMS[fmt]
+    kwargs = {}
+    if forward is not None:
+        kwargs[forward_param] = forward if style == "sign" else _AXIS_WORD[forward]
+    if up is not None:
+        kwargs[up_param] = up if style == "sign" else _AXIS_WORD[up]
+    return kwargs
+
+
 # format -> export kwargs that make every action currently in bpy.data.actions come out as its
 # own separate output animation clip, used by anim.py --combine. Confirmed on real Blender
 # 4.2.23 (tests/test_all.py): glTF's export_animation_mode='ACTIONS' already does this by

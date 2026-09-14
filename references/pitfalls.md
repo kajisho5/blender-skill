@@ -489,3 +489,31 @@ Python) uses it for pixel-array work (`look.py`'s texture grid/compare, `render.
 mode, `bake.py`'s pixel-stat verification). The stdlib-only guarantee is about the *host*
 scripts and about not requiring `pip install` anything; Blender's own bundled capabilities are
 part of "depends on Blender", not an extra dependency.
+
+## USD's axis-orientation export needs an extra master switch, and rotates a root wrapper, not each object
+
+`convert.py --up-axis`/`--forward-axis` (RM-029) translates a forward/up axis request into each
+format's own export kwargs (`scripts/bpy/_compat.py`'s `axis_export_kwargs`). For USD/USDZ,
+setting `export_global_up_selection`/`export_global_forward_selection` alone has **no effect** --
+confirmed by exporting the same off-origin object with only those two set vs. also setting
+`convert_orientation=True`: the first export's `upAxis` stage metadata still read the untouched
+default and no rotation appeared anywhere in the file; only with `convert_orientation=True` did
+`upAxis` change and a rotation appear. That rotation is applied as a single `rotateXYZ` on one
+root-level `Xform` prim wrapping the whole scene, not by rotating each object's own
+`xformOp:translate` -- confirmed by reading the exported `.usda`'s own text directly (not
+Blender's reimport of it, which resolves the rotation transparently and would hide this). Also
+confirmed: USD's importer (`wm.usd_import`) has no equivalent override at all -- it always reads
+`upAxis` from the file's own stage metadata; axis control is export-only here.
+
+## OBJ's own default axis convention isn't Blender's native axes
+
+OBJ's native import/export operators (`wm.obj_import`/`wm.obj_export`) default to
+`forward_axis=NEGATIVE_Z, up_axis=Y` (confirmed via their own `bl_rna` defaults) -- OBJ's
+traditional Y-up/-Z-forward authoring convention, not Blender's own Z-up axes. This is not a
+bug: import and export share the same default, so this skill's own OBJ round trips (and any
+OBJ<->OBJ conversion) stay self-consistent without needing `--up-axis`/`--forward-axis` at all.
+It only becomes visible if one side of a conversion requests an explicit, non-default axis
+(e.g. testing with a "no conversion, trust Blender's own axes" OBJ export) while the other side
+still uses the default -- discovered exactly that way while verifying RM-029's `--up-axis`
+against a fresh OBJ fixture, before switching to a `.blend` source (which has no import-axis
+step to introduce this kind of ambiguity) to get a clean, unconfounded result.
