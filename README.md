@@ -15,6 +15,38 @@ Any of the three installs `SKILL.md` and `scripts/` where your agent looks for s
 (`--blender` flag, `$BLENDER`, `PATH`, or the OS's usual install location) and tell you how to
 install it if they can't.
 
+## Demo
+
+Real output from `examples/make_demo.sh` against `tests/fixtures/fox.glb` -- nothing staged.
+
+<p align="center">
+  <img src="docs/demo/thumbnail.png" alt="render.py thumbnail" width="45%">
+  <img src="docs/demo/sheet.png" alt="render.py --sheet, a 4-view contact sheet" width="45%">
+</p>
+
+A 360° turntable (`render.py --turntable -o turntable.mp4`) is at
+[`docs/demo/turntable.mp4`](docs/demo/turntable.mp4). The same run's `info.py`/`check.py` output,
+unedited:
+
+```
+$ python3 scripts/info.py tests/fixtures/fox.glb
+tests/fixtures/fox.glb: 3 object(s), 2 mesh(es), 656 triangles, 1770 vertices
+  materials: 1  textures: 1  animations: 3
+  warning: fox: 1150 non-manifold edge(s) (hole/gap in the surface, after welding split normals/UV seams) -- try: optimize.py <file> -o <out> --fill-holes
+  warning: fox: flipped-normal check skipped (unreliable while non-manifold edges are present -- fix those first, then re-run info.py)
+
+$ python3 scripts/check.py tests/fixtures/fox.glb --target three.js
+tests/fixtures/fox.glb vs three.js: PASS
+  PASS format: gltf is a recommended format for three.js
+  PASS triangle budget: 656 <= 300000
+  PASS texture size: all textures <= 4096px
+  PASS textures present: no missing texture files
+  PASS transmission size: 0.2 MB <= 15 MB
+```
+
+Run `bash examples/make_demo.sh` yourself to regenerate all of it (info, optimize, convert
+`--verify`, render, look, bake, check) end to end -- needs Blender, see Requirements below.
+
 ## What this is / isn't
 
 Inspects, converts, optimizes, renders, bakes and validates 3D assets from natural-language
@@ -33,11 +65,15 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   box, non-manifold-edge and duplicate-vertex detection (computed on a welded scratch copy, so a
   perfectly normal hard-edged/UV-seamed mesh isn't misreported as broken), approximate
   self-intersection detection, flipped-normal detection (only reported when trustworthy -- see
-  below), UV presence, each defect naming its fix command where a safe one exists.
+  below), unapplied-scale detection (a common cm/m unit-mismatch symptom), origin offset from each
+  object's own bounding-box center/bottom-center (data, not a defect -- an off-center origin is
+  often deliberate), UV presence, each defect naming its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
-  boundary-edge holes (`--fill-holes`), cap texture resolution, purge orphan data;
+  boundary-edge holes (`--fill-holes`), bake unapplied scale into the mesh (`--fix-scale`),
+  recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
+  resolution, purge orphan data;
   `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say

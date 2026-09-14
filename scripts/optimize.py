@@ -13,6 +13,8 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --target-mobile
   python3 scripts/optimize.py model.glb -o model_optimized.glb --weld-doubles --triangulate --purge-unused
   python3 scripts/optimize.py model.glb -o model_optimized.glb --fill-holes
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --fix-scale
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --origin bottom
   python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
   python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
 """
@@ -35,6 +37,8 @@ def main() -> int:
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--decimate-ratio", type=float, help="0-1, fraction of triangles to keep")
     ap.add_argument("--fill-holes", action="store_true", help="fill boundary-edge holes/gaps (see info.py's non-manifold warning); does not touch non-manifold edges shared by 3+ faces")
+    ap.add_argument("--fix-scale", action="store_true", help="bake unapplied object scale into the mesh (a common cm/m unit-mismatch symptom -- see info.py's scale warning); world-space size is unchanged")
+    ap.add_argument("--origin", choices=["center", "bottom", "keep"], help="move each object's origin to its bounding-box center or bottom-center, without moving the geometry in world space; default keep")
     ap.add_argument("--weld-doubles", action="store_true", help="merge vertices at the same position (dist 1e-5)")
     ap.add_argument("--recalc-normals", action="store_true", help="recalculate outside-facing normals")
     ap.add_argument("--triangulate", action="store_true")
@@ -67,7 +71,7 @@ def main() -> int:
             "decimate_ratio": args.decimate_ratio, "fill_holes": args.fill_holes, "weld_doubles": args.weld_doubles,
             "recalc_normals": args.recalc_normals, "triangulate": args.triangulate,
             "texture_max": args.texture_max, "purge_unused": args.purge_unused,
-            "target": args.target,
+            "target": args.target, "fix_scale": args.fix_scale, "origin": args.origin,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -116,6 +120,8 @@ def main() -> int:
             print(f"  welded {data['vertices_welded']} duplicate vertices")
         if data["holes_filled"]:
             print(f"  filled {data['holes_filled']} hole(s)")
+        if data["scales_fixed"]:
+            print(f"  applied scale on {data['scales_fixed']} object(s)")
         for t in data["textures_resized"]:
             print(f"  texture {t['name']}: {t['from']} -> {t['to']}")
         if data["orphan_data_purged"]:

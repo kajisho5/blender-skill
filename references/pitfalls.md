@@ -159,6 +159,43 @@ bmesh keeps UV/custom-normal data per face-corner (loop), not per vertex, so a r
 re-splits vertices the same way the original file was authored. `optimize.py --fill-holes` always
 welds before scanning for holes, whether or not one is actually present.
 
+## "Units not set" can't actually happen in this skill's own pipeline
+
+RM-002 asked for detecting both an unapplied cm/m scale *and* a scene with no unit system set
+(`scene.unit_settings.system == 'NONE'`). The first is real and common (see the next entry) --
+the second is not reachable here: `_compat.reset_scene()` calls
+`bpy.ops.wm.read_factory_settings(use_empty=True)` before every import, and confirmed on a real
+Blender, factory-startup's default unit system is already `'METRIC'`, not `'NONE'` -- and none of
+this skill's importers (glTF forces `METRIC` itself; OBJ/STL/PLY don't touch unit settings at all)
+ever change it away from that. So `info.py` only implements the scale-mismatch half; a
+"units not set" check would be dead code that can never fire given how this skill resets state
+before every operation.
+
+## An unapplied object scale is a real, glTF-roundtrip-faithful defect signal
+
+An object with `scale` left at e.g. `(0.01, 0.01, 0.01)` instead of baked into the mesh (the
+classic symptom of importing a cm-authored asset into an m-scene, or vice versa, without applying
+the resulting scale) round-trips through glTF export/import exactly as-is -- confirmed: Blender's
+glTF exporter writes it as a node-level scale, not baked-in vertex positions, so `info.py` can
+reliably read it back off `obj.scale` without needing to infer anything from geometry.
+`bpy.ops.object.transform_apply(scale=True)` bakes it into the mesh data while leaving
+world-space dimensions/position unchanged (confirmed: an object with scale `(0.01, 0.01, 0.01)`
+and world dimensions `(2, 2, 2)` keeps those same world dimensions and ends up with scale
+`(1, 1, 1)` afterward) -- that's `optimize.py --fix-scale`.
+
+## An off-center object origin is not itself a defect
+
+Unlike non-manifold/self-intersecting/flipped-normal, `info.py`'s `origin_offset_from_center` /
+`origin_offset_from_bottom_center` (how far the object's origin sits from its own local
+bounding-box center/bottom-center) is reported as plain data, never a warning: many real assets
+deliberately put their origin somewhere other than the geometric center for correct behavior in a
+game engine or rig (a door's origin at its hinge edge, a wheel's at its axle, a character's at its
+feet) -- flagging every one of those as "wrong" would be actively incorrect advice.
+`optimize.py --origin center|bottom` moves the origin without moving the geometry in world space
+(confirmed: the object's world-space bounding box is bit-identical before and after) -- there when
+an agent or user has decided that specific convention is what they want, never applied on info.py's
+own initiative.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in
