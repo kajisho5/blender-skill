@@ -81,7 +81,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   a draw-call estimate (one per distinct material a mesh object's faces actually use, not the
   cruder "material count x object count" that overestimates as soon as objects share a material),
   misconfigured-transparency detection (a hard binary-alpha mask, e.g. foliage, using real
-  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), (glb/gltf only)
+  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), misconfigured-
+  texture-colorspace detection (Base Color/Emission not tagged `sRGB`, or Metallic/Roughness/
+  Alpha/a normal map's own texture not tagged `Non-Color` -- the latter is the most damaging in
+  practice: a mistagged normal map silently warps the decoded normal vectors, no error thrown),
+  (glb/gltf only)
   the file's own `extensionsUsed`/`extensionsRequired` list read straight from its JSON -- with a
   short description per known `KHR_*`/`EXT_*` extension -- since Blender's importer translates
   those into its own representation and doesn't expose which ones the source file declared, and
@@ -128,7 +132,13 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
   so and skip just that step when they aren't. `--recalc-normals` warns instead of silently
   trusting its own output on a still-non-manifold mesh -- see `references/pitfalls.md`, this is a
-  real failure mode, not a hypothetical one.
+  real failure mode, not a hypothetical one. `--fix-colorspace` corrects a texture's colorspace
+  tag based on which material socket it feeds (Base Color/Emission need `sRGB`; Metallic/
+  Roughness/Alpha/a normal map's own texture need `Non-Color` -- info.py flags the mismatch,
+  this fixes it); `--texture-colorspace NAME` is the blunt override, forcing every texture to one
+  named colorspace (e.g. `ACEScg`/`ACES2065-1` for an ACES-aware pipeline -- Blender's own
+  bundled OCIO config has no ACES *view transform* for rendering at all, only these texture-
+  tagging colorspaces, confirmed via its real enum).
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a

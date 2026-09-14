@@ -415,6 +415,72 @@ def _alpha_is_binary_mask(image):
     return (mid / total) < 0.02 if total else None
 
 
+_COLOR_SOCKETS = {"Base Color", "Emission Color"}
+_DATA_SOCKETS = {"Metallic", "Roughness", "Alpha"}
+
+
+def _connected_image(socket):
+    """The Image directly feeding a Principled BSDF input via an Image Texture node, or None --
+    same "one direct link, not a full node-graph evaluation" scope as _find_alpha_image."""
+    if socket is None or not socket.is_linked:
+        return None
+    node = socket.links[0].from_node
+    return node.image if node.type == "TEX_IMAGE" else None
+
+
+def _normal_map_image(bsdf):
+    """The Image feeding a material's Normal Map node, if the BSDF's Normal input is wired
+    through one (the standard way a normal-map texture reaches Principled BSDF -- a raw Image
+    Texture output never plugs directly into Normal)."""
+    normal_input = bsdf.inputs.get("Normal")
+    if normal_input is None or not normal_input.is_linked:
+        return None
+    node = normal_input.links[0].from_node
+    if node.type != "NORMAL_MAP":
+        return None
+    return _connected_image(node.inputs.get("Color"))
+
+
+def _colorspace_issues(materials):
+    """Textures whose colorspace tag doesn't match what the socket they feed needs to be
+    correctly interpreted: Base Color/Emission need 'sRGB' (that's the perceptual space the
+    texture's own pixels were authored in); Metallic/Roughness/Alpha and a normal map's texture
+    need 'Non-Color' (raw data, not a display color -- tagging one of these 'sRGB' by mistake
+    makes Blender gamma-decode it before use, corrupting the actual values it's supposed to
+    represent -- a real, well-known pipeline mistake, most damaging on a normal map: it silently
+    warps the decoded normal vectors rather than throwing any error). A same-image mistake shows
+    up once per socket it's wired to, since fixing it needs re-checking each socket anyway.
+    """
+    issues = []
+    for mat in materials:
+        if not mat.use_nodes or not mat.node_tree:
+            continue
+        bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not bsdf:
+            continue
+        for socket_name in _COLOR_SOCKETS:
+            image = _connected_image(bsdf.inputs.get(socket_name))
+            if image and image.colorspace_settings.name != "sRGB":
+                issues.append({
+                    "material": mat.name, "socket": socket_name, "image": image.name,
+                    "colorspace": image.colorspace_settings.name, "expected": "sRGB",
+                })
+        for socket_name in _DATA_SOCKETS:
+            image = _connected_image(bsdf.inputs.get(socket_name))
+            if image and image.colorspace_settings.name != "Non-Color":
+                issues.append({
+                    "material": mat.name, "socket": socket_name, "image": image.name,
+                    "colorspace": image.colorspace_settings.name, "expected": "Non-Color",
+                })
+        normal_image = _normal_map_image(bsdf)
+        if normal_image and normal_image.colorspace_settings.name != "Non-Color":
+            issues.append({
+                "material": mat.name, "socket": "Normal", "image": normal_image.name,
+                "colorspace": normal_image.colorspace_settings.name, "expected": "Non-Color",
+            })
+    return issues
+
+
 def _transparency_issues(materials):
     """Materials whose alpha texture is a hard/binary mask but use real alpha blending
     (surface_render_method == 'BLENDED') instead of the cheaper, sorting-artifact-free dithered
@@ -684,6 +750,13 @@ def run(args):
     transparency_issues = _transparency_issues(materials)
     for issue in transparency_issues:
         warnings.append(f"material '{issue['material']}': {issue['issue']}")
+    colorspace_issues = _colorspace_issues(materials)
+    for issue in colorspace_issues:
+        warnings.append(
+            f"material '{issue['material']}': '{issue['image']}' feeding {issue['socket']} is "
+            f"tagged '{issue['colorspace']}', expected '{issue['expected']}' -- try: "
+            "optimize.py <file> -o <out> --fix-colorspace"
+        )
     for stats in per_object:
         if stats["non_manifold_edges"]:
             fix = ("try: optimize.py <file> -o <out> --fill-holes" if stats["boundary_edges"]
@@ -748,6 +821,7 @@ def run(args):
             "count": len(materials),
             "names": [m.name for m in materials],
             "transparency_issues": transparency_issues,
+            "colorspace_issues": colorspace_issues,
         },
         "textures": _texture_info(),
         "armatures": _armatures(),
