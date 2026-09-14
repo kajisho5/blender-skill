@@ -275,6 +275,27 @@ at the same weight they already had. Getting a genuinely unweighted vertex requi
 `vertex_group.remove([index])` after auto-parenting, not merely omitting that index from a
 weight-assignment call.
 
+## `optimize.py --decimate-ratio`'s own triangle count can disagree with the real output file
+
+Discovered while sanity-checking RM-010's LOD ratio suggestions against a real decimate run:
+`optimize.py fox.glb -o out.glb --decimate-ratio 0.5` reported `triangles_after: 328` (576->288
+for the `fox` mesh, 80->40 for the `Icosphere` eye mesh -- both correct, measured on `obj.data`
+right before export) but re-running `info.py` on the actual `out.glb` shows 368: `fox` decimated
+correctly, `Icosphere` silently reverted to its original 80. Confirmed in isolation (decimating
+only `Icosphere`, `fox` untouched) that this is real, not a fixture artifact: the in-memory mesh
+genuinely is 40 polys immediately before export (both `obj.data` and a fresh
+`evaluated_depsgraph_get()` agree), an explicit `view_layer.update()` before export doesn't fix
+it, and `export_apply=True` makes it worse (both objects revert). A plain no-op export/reimport
+with no modification at all round-trips perfectly, so this is specific to the decimate+apply
+step for at least this object, not a general glTF round-trip issue -- and counter-intuitively,
+`fox` (whose added Decimate modifier isn't first in the stack, behind the pre-existing Armature
+modifier, triggering Blender's own "Applied modifier was not first" warning) is the one that
+exports *correctly*; the "clean" object with no other modifiers is the one that silently loses
+its decimation. Root cause not yet isolated -- tracked as
+[#111](https://github.com/kajisho5/blender-skill/issues/111), not blocking `info.py`'s LOD
+suggestions (RM-010), which only compute ratios from the current triangle count and never call
+`optimize.py` or trust its output.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

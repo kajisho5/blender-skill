@@ -399,6 +399,38 @@ def _bone_hierarchy(armature_data):
     return [{"name": b.name, "parent": b.parent.name if b.parent else None} for b in armature_data.bones]
 
 
+def _lod_suggestions(total_triangles):
+    """A conservative default LOD ladder (50%/25%/10% of the current total triangle count --
+    close to Unity/Unreal/Godot's own built-in LOD-group defaults) with each level's *estimated*
+    resulting triangle count and the optimize.py command to produce it. `target_triangles` is a
+    goal to aim the ratio at, not a guarantee: Decimate's own ratio is itself approximate, and
+    (see references/pitfalls.md, issue #111) the actual output can differ further from what
+    optimize.py's own report claims for a given run -- always re-run info.py on the real output
+    to confirm what a decimate actually produced, never trust the target number alone.
+
+    Computed from the *file's total* triangle count, not per-object: optimize.py's
+    --decimate-ratio is a single ratio applied uniformly across every mesh object in one run
+    (see optimize.py's run()), so a per-object ratio wouldn't match what the suggested command
+    actually does. Not tied to any particular delivery target's budget -- check.py already does
+    target-specific PASS/WARN/FAIL; this is just the standard starting point most engines ship,
+    useful even with no target in mind yet.
+    """
+    if total_triangles <= 0:
+        return []
+    out = []
+    for level, ratio in (("LOD1", 0.5), ("LOD2", 0.25), ("LOD3", 0.1)):
+        target = round(total_triangles * ratio)
+        if target < 1:
+            continue
+        out.append({
+            "level": level,
+            "ratio": ratio,
+            "target_triangles": target,
+            "command": f"optimize.py <file> -o <out> --decimate-ratio {ratio}",
+        })
+    return out
+
+
 def _armatures():
     out = []
     for obj in bpy.data.objects:
@@ -507,6 +539,7 @@ def run(args):
             "triangles": total_tris,
             "vertices": total_verts,
             "per_object": per_object,
+            "lod_suggestions": _lod_suggestions(total_tris),
         },
         "materials": {"count": len(materials), "names": [m.name for m in materials]},
         "textures": _texture_info(),
