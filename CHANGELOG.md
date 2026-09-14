@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.18.0...blender-skill-v0.19.0) (2026-09-14)
+
+
+### Features
+
+* **info,optimize:** explicit texture colorspace correction (RM-030) ([#136](https://github.com/kajisho5/blender-skill/issues/136)) ([441142d](https://github.com/kajisho5/blender-skill/commit/441142d27b4f7b9ec5148ca223bafacb63cfc261))
+* **optimize:** batch-generate LOD0-3 files (RM-031) ([#138](https://github.com/kajisho5/blender-skill/issues/138)) ([64d7051](https://github.com/kajisho5/blender-skill/commit/64d70510ce65e547d1b785a80f20b65d6e558bf5))
+
 ## [0.18.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.17.0...blender-skill-v0.18.0) (2026-09-14)
 
 
