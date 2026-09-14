@@ -570,6 +570,47 @@ class TestToolchain(unittest.TestCase):
         proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--webp", "--json")
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_split_separates_independent_hierarchies(self):
+        # fox.glb: "fox" (mesh) is parented to "root" (armature) via both Object parenting and
+        # an Armature modifier -- root+fox must stay one group. "Icosphere" has no parent at all
+        # and must become its own, separate group. Blender's glTF importer also parks Icosphere
+        # in an auto-created "glTF_not_exported" collection (confirmed: hide_viewport=True on
+        # that collection); see references/pitfalls.md for why merely unhiding it wasn't enough.
+        out_dir = self.out / "split"
+        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        groups = {g["root_object"]: g for g in data["groups"]}
+        self.assertEqual(set(groups), {"root", "Icosphere"})
+        self.assertEqual(set(groups["root"]["objects"]), {"root", "fox"})
+        self.assertEqual(groups["Icosphere"]["objects"], ["Icosphere"])
+
+    def test_split_outputs_are_valid_and_reimportable(self):
+        # The real regression this guards: before the "glTF_not_exported"-collection fix, the
+        # Icosphere output was an empty/near-empty 132-byte file that still "succeeded".
+        out_dir = self.out / "split"
+        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        outputs = {g["root_object"]: Path(g["output"]) for g in data["groups"]}
+
+        ico_path = outputs["Icosphere"]
+        self.assertGreater(ico_path.stat().st_size, 1000)  # not the empty-export symptom (132 bytes)
+        ico_info = json.loads(run("info.py", str(ico_path), "--json").stdout)
+        self.assertEqual(ico_info["objects"]["by_type"], {"MESH": 1})
+        self.assertEqual(ico_info["armatures"], [])
+
+        root_path = outputs["root"]
+        root_info = json.loads(run("info.py", str(root_path), "--json").stdout)
+        self.assertEqual(len(root_info["armatures"]), 1)
+        self.assertEqual(root_info["armatures"][0]["bone_count"], 24)
+        self.assertEqual(len(root_info["animations"]), 3)  # Run_root, Survey_root, Walk_root all kept
+
+    def test_split_rejects_blend_output_format(self):
+        out_dir = self.out / "split_blend"
+        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--format", "blend", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
         # exactly. STL has no index buffer at all (every triangle stores 3 independent
