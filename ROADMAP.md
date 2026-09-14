@@ -29,7 +29,7 @@ what v0.1.0 actually does.
 | RM-016 | convert | USD/USDZ 出力の iOS Quick Look 互換性検証 | done | #16 |
 | RM-017 | convert | FBX→glTF のアニメ保持の再import検証を標準化 | done | |
 | RM-018 | convert | OBJ/MTL→PBR 変換のヒューリスティック | done | #17 |
-| RM-019 | convert | STL 出力の3Dプリント向け（単位・マニフォールド・壁厚） | planned | #18 |
+| RM-019 | convert | STL 出力の3Dプリント向け（単位・マニフォールド・壁厚） | done | #18 |
 | RM-020 | convert | Alembic 入出力 | done | |
 | RM-021 | convert | PLY 点群の入出力と間引き | planned | #19 |
 | RM-022 | convert | Draco 圧縮（Blender glTFエクスポーターの設定経由） | done | |

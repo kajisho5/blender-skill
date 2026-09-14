@@ -92,7 +92,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   Blender's own OBJ importer applies -- confirmed to match its real output exactly -- since
   OBJ/MTL predates PBR and has no metallic/roughness channels of its own (metallic is never
   guessed: no reliable signal separates a metal from a shiny dielectric in Phong parameters
-  alone), each defect naming its fix command where a safe one exists.
+  alone), and ray-cast wall-thickness analysis (a real, testable "3D-Print Toolbox"-style
+  thickness check -- that add-on itself is a Blender Extension as of 4.2+, not bundled, so not
+  something this skill can assume is installed), each defect naming its fix command where a safe
+  one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
