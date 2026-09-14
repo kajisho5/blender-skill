@@ -100,6 +100,9 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
+- **`split.py`** -- split one multi-object file into one output file per independent object
+  hierarchy (a root object with no parent, plus every descendant), so a skinned mesh stays with
+  its armature while an unrelated standalone object becomes its own file.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
   boundary-edge holes (`--fill-holes`), bake unapplied scale into the mesh (`--fix-scale`),
   recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
@@ -152,6 +155,7 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 |---|---|
 | `info.py` | Inspect: counts, scale, bounding box, manifold/UV checks |
 | `convert.py` | Cross-format conversion, with round-trip `--verify` |
+| `split.py` | Split a multi-object file into one file per independent object hierarchy |
 | `optimize.py` | Decimate, weld, triangulate, cap texture size, purge unused, Draco/Meshopt/KTX2 (delegated) |
 | `render.py` | Thumbnail, turntable, 4-view sheet |
 | `look.py` | Wireframe, texture grid, before/after compare, UV layout |

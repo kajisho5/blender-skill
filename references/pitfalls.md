@@ -413,6 +413,35 @@ py --webp` reports the real measured `texture_bytes_before`/`texture_bytes_after
 from each file's own glTF JSON, `scripts/_gltf_extensions.py`'s `total_image_bytes`) rather than
 claiming a reduction happened.
 
+## A selection-only export can silently skip an object even when it's visible and selected
+
+`split.py` (RM-027) groups a multi-object file into independent root-object hierarchies and
+exports each group via a `use_selection=True`-style call (`_compat.export_selected`). On
+fox.glb, the "Icosphere" object (no parent, its own hierarchy) exported as an empty 132-byte
+file while "root"+"fox" exported correctly. Root cause, found in stages:
+
+1. Blender's own glTF importer places any node not reachable from the file's default scene roots
+   into an auto-created **"glTF_not_exported"** collection, with `Collection.hide_viewport =
+   True` (confirmed: `Icosphere.users_collection == ["glTF_not_exported"]` after import).
+2. An object inside a viewport-hidden collection can't be selected at all --
+   `obj.select_set(True)` silently no-ops and `obj.select_get()` stays `False`. Unhiding the
+   collection (`coll.hide_viewport = False`) fixes *this* symptom in isolation.
+3. But fixing only the selection state wasn't enough: even after unhiding the collection and
+   confirming `obj.visible_get() == True` and `obj.select_get() == True` right before the export
+   call, `bpy.ops.export_scene.gltf(..., use_selection=True)` still logged "Finished glTF 2.0
+   export" and still wrote an empty 132-byte file. Selection/visibility state was never the real
+   blocker -- Blender's glTF exporter excludes an object by its **collection membership**
+   (specifically, being in a collection literally named `glTF_not_exported`), independent of
+   whether that object is currently selected or visible.
+
+Confirmed fix: relink every object into the scene's root collection
+(`bpy.context.scene.collection`) before selecting/exporting, unlinking it from any other
+collection first -- not just toggling `hide_viewport`. Verified on fox.glb: the same Icosphere
+export went from 132 bytes to 9140 bytes, a real non-empty, re-importable file (`info.py`
+confirms 1 mesh object, no armature). `split.py` does this relink unconditionally for every
+object right after import, so it also sidesteps any other importer-created collection with the
+same kind of export-time exclusion, not just this one named collection.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

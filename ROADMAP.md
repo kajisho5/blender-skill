@@ -37,7 +37,7 @@ what v0.1.0 actually does.
 | RM-024 | convert | WebP テクスチャ変換 | done | #20 |
 | RM-025 | convert | .blend → .blend のバージョン変換（古い.blendを4.x/5.xで再保存） | done | |
 | RM-026 | convert | 複数ファイル→1つのglbへマージ | done | |
-| RM-027 | convert | 1つのglb→オブジェクト単位に分割 | planned | #21 |
+| RM-027 | convert | 1つのglb→オブジェクト単位に分割 | done | #21 |
 | RM-028 | convert | アニメーションだけを別ファイルに分離/結合（Mixamo系ワークフロー） | planned | #22 |
 | RM-029 | convert | 座標系変換（Y-up/Z-up、左手/右手）明示指定 | planned | #23 |
 | RM-030 | convert | カラースペース変換（sRGB/Linear/ACES）の明示 | planned | #24 |

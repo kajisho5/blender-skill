@@ -25,6 +25,21 @@ _OPS = {
 }
 
 
+# format -> the export operator's own "only the selected objects" boolean parameter name --
+# every exporter spells this differently. Confirmed against each operator's own bl_rna on real
+# Blender 4.2.23. blend/ has no such concept (a .blend always saves the whole file).
+_SELECTION_PARAM = {
+    "gltf": "use_selection",
+    "fbx": "use_selection",
+    "obj": "export_selected_objects",
+    "stl": "export_selected_objects",
+    "ply": "export_selected_objects",
+    "usd": "selected_objects_only",
+    "usdz": "selected_objects_only",
+    "abc": "selected",
+}
+
+
 def _op(pair):
     mod, name = pair
     return getattr(getattr(bpy.ops, mod), name)
@@ -74,6 +89,18 @@ def export_file(path: str, fmt: str, **kwargs) -> None:
     merged = dict(_EXPORT_DEFAULTS.get(fmt, {}))
     merged.update(kwargs)
     _op(_OPS[fmt][1])(filepath=path, **merged)
+
+
+def export_selected(path: str, fmt: str, **kwargs) -> None:
+    """Like export_file, but only the currently-selected objects -- used by split.py to write
+    one object hierarchy at a time out of a multi-object scene. Raises ValueError for a format
+    with no such concept (.blend always saves the whole file). The caller is responsible for
+    selecting exactly the objects it wants first (obj.select_set(...)).
+    """
+    if fmt not in _SELECTION_PARAM:
+        raise ValueError(f"{fmt!r} has no selection-only export option")
+    kwargs[_SELECTION_PARAM[fmt]] = True
+    export_file(path, fmt, **kwargs)
 
 
 def eevee_engine_id() -> str:
