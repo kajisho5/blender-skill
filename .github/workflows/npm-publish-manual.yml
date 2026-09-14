@@ -1,0 +1,37 @@
+# Manual recovery valve: publish an already-tagged release to npm on demand.
+#
+# release-please's own action only ever reports release_created=true once, at the exact
+# moment a Release PR merge creates the tag/GitHub Release -- if the "Publish to npm" step
+# in release-please.yml fails at that moment (as it did for v0.2.0, missing id-token: write),
+# there is no built-in way to make release-please "replay" that publish; re-running the same
+# workflow run just re-evaluates release state fresh and skips publish because the release
+# already exists. This workflow re-publishes a specific tag directly, independent of that.
+name: npm-publish-manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git tag to publish (e.g. blender-skill-v0.2.0)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
