@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.8.0...blender-skill-v0.9.0) (2026-09-14)
+
+
+### Features
+
+* **info:** LOD ratio suggestions from triangle count (RM-010) ([#113](https://github.com/kajisho5/blender-skill/issues/113)) ([05362e8](https://github.com/kajisho5/blender-skill/commit/05362e831ea7d0adb53fc6862737a74b2c6ccb6e))
+
 ## [0.8.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.7.0...blender-skill-v0.8.0) (2026-09-14)
 
 
