@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.2.1...blender-skill-v0.3.0) (2026-09-14)
+
+
+### Features
+
+* **info,optimize:** non-manifold/self-intersection/flipped-normal fix suggestions (RM-001) ([#95](https://github.com/kajisho5/blender-skill/issues/95)) ([b9b1343](https://github.com/kajisho5/blender-skill/commit/b9b13439b9525880143c306561dbadd810cf472b))
+
 ## [0.2.1](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.2.0...blender-skill-v0.2.1) (2026-09-14)
 
 
