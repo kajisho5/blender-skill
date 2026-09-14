@@ -34,7 +34,7 @@ what v0.1.0 actually does.
 | RM-021 | convert | PLY 点群の入出力と間引き | done | #19 |
 | RM-022 | convert | Draco 圧縮（Blender glTFエクスポーターの設定経由） | done | |
 | RM-023 | convert | KTX2/Basis テクスチャ（toktxがあれば使う、無ければ案内） | done | |
-| RM-024 | convert | WebP テクスチャ変換 | planned | #20 |
+| RM-024 | convert | WebP テクスチャ変換 | done | #20 |
 | RM-025 | convert | .blend → .blend のバージョン変換（古い.blendを4.x/5.xで再保存） | done | |
 | RM-026 | convert | 複数ファイル→1つのglbへマージ | done | |
 | RM-027 | convert | 1つのglb→オブジェクト単位に分割 | planned | #21 |

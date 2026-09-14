@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _common
 import _delegate
 import _formats
+import _gltf_extensions
 import _run
 from _common import SkillError
 
@@ -45,6 +46,8 @@ def main() -> int:
     ap.add_argument("--texture-max", type=int, metavar="PX", help="downscale any texture wider/taller than this")
     ap.add_argument("--purge-unused", action="store_true", help="remove orphan data blocks (unused meshes/materials/images/actions) after other operations")
     ap.add_argument("--point-thin-voxel", type=float, metavar="SIZE", help="thin a point cloud (a vertices-only mesh, e.g. from PLY scan data) by voxel-grid downsampling: keep one point per SIZE-sized grid cell. No-op on any mesh that has faces -- use --decimate-ratio for those.")
+    ap.add_argument("--webp", action="store_true", help="convert every texture to WebP on export (glb/gltf output only; adds the EXT_texture_webp extension). Not always smaller -- WebP at default quality can exceed a well-compressed PNG for some textures; the reported before/after byte counts are measured, never assumed.")
+    ap.add_argument("--webp-quality", type=int, metavar="0-100", help="WebP encode quality (default 75, Blender's own default); only used with --webp")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -65,6 +68,8 @@ def main() -> int:
             raise SkillError("unrecognized file extension on input or output", kind="input")
         if (args.draco or args.meshopt or args.ktx2) and out_fmt != "gltf":
             raise SkillError("--draco/--meshopt/--ktx2 need a glb/gltf output (gltf-transform doesn't operate on other formats)", kind="input")
+        if args.webp and out_fmt != "gltf":
+            raise SkillError("--webp needs a glb/gltf output (EXT_texture_webp is a glTF extension)", kind="input")
 
         bpy_args = {
             "path": str(in_path.resolve()), "format": in_fmt,
@@ -74,6 +79,7 @@ def main() -> int:
             "texture_max": args.texture_max, "purge_unused": args.purge_unused,
             "target": args.target, "fix_scale": args.fix_scale, "origin": args.origin,
             "point_thin_voxel": args.point_thin_voxel,
+            "webp": args.webp, "webp_quality": args.webp_quality,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -90,6 +96,14 @@ def main() -> int:
     data = result["data"]
     data["delegated"] = []
     out_str = str(Path(args.out).resolve())
+    if args.webp:
+        # Measured, never assumed: WebP at default quality can end up *larger* than a
+        # well-compressed PNG for some textures (confirmed -- see references/pitfalls.md), so
+        # report the file's own real before/after image bytes rather than a claimed reduction.
+        before_bytes = _gltf_extensions.total_image_bytes(str(in_path)) if in_fmt == "gltf" else None
+        after_bytes = _gltf_extensions.total_image_bytes(out_str)
+        data["texture_bytes_before"] = before_bytes
+        data["texture_bytes_after"] = after_bytes
     if args.draco or args.meshopt:
         subcommand = "draco" if args.draco else "meshopt"
         if not _delegate.gltf_transform_available():
@@ -128,6 +142,13 @@ def main() -> int:
             print(f"  thinned {data['points_thinned']} point(s) from the point cloud")
         for t in data["textures_resized"]:
             print(f"  texture {t['name']}: {t['from']} -> {t['to']}")
+        if args.webp:
+            before, after = data.get("texture_bytes_before"), data.get("texture_bytes_after")
+            if before is not None and after is not None:
+                direction = "smaller" if after < before else "LARGER" if after > before else "unchanged"
+                print(f"  webp: texture bytes {before} -> {after} ({direction} -- measured, not assumed)")
+            else:
+                print(f"  webp: texture bytes after = {after}")
         if data["orphan_data_purged"]:
             print(f"  purged {data['orphan_data_purged']} orphan data block(s)")
         for d in data["delegated"]:

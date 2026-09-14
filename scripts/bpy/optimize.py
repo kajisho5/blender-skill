@@ -252,7 +252,15 @@ def run(args):
     purged = _purge_unused() if args.get("purge_unused") else 0
 
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
-    _compat.export_file(args["output"], args["output_format"])
+    export_kwargs = {}
+    if args.get("webp") and args["output_format"] == "gltf":
+        # export_image_add_webp/export_image_webp_fallback both default to False already (a
+        # WebP-only image, no PNG/JPEG fallback copy also embedded) -- exactly what a format
+        # *conversion* wants, so left at their defaults rather than set explicitly.
+        export_kwargs["export_image_format"] = "WEBP"
+        if args.get("webp_quality"):
+            export_kwargs["export_image_quality"] = args["webp_quality"]
+    _compat.export_file(args["output"], args["output_format"], **export_kwargs)
 
     return {
         "triangles_before": before_tris,

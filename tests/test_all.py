@@ -542,6 +542,34 @@ class TestToolchain(unittest.TestCase):
         proc = run("info.py", str(out), "--json")
         self.assertEqual(json.loads(proc.stdout)["meshes"]["per_object"][0]["vertices"], 24)
 
+    def test_optimize_webp_converts_texture_and_reports_measured_size(self):
+        # fox.glb's one PNG texture (26764 bytes, real measured number) actually grows to 30060
+        # bytes as WebP at Blender's own default quality (75) -- a real, confirmed finding
+        # (references/pitfalls.md), not a hypothetical -- so this pins the measured before/after,
+        # never a claimed reduction.
+        out = self.out / "fox_webp.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--webp", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["texture_bytes_before"], 26764)
+        self.assertEqual(data["texture_bytes_after"], 30060)
+        # And the output genuinely declares the glTF extension this conversion adds.
+        proc = run("info.py", str(out), "--json")
+        ext = json.loads(proc.stdout)["gltf_extensions"]
+        self.assertEqual(ext["used"], ["EXT_texture_webp"])
+
+    def test_optimize_webp_quality_flag_actually_changes_output_size(self):
+        out = self.out / "fox_webp_q30.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--webp", "--webp-quality", "30", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertLess(data["texture_bytes_after"], data["texture_bytes_before"])
+
+    def test_optimize_webp_rejects_non_gltf_output(self):
+        out = self.out / "fox_webp.stl"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--webp", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
         # exactly. STL has no index buffer at all (every triangle stores 3 independent

@@ -105,7 +105,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
   resolution, purge orphan data, thin a point cloud by voxel-grid downsampling
   (`--point-thin-voxel SIZE` -- a no-op on any mesh that has faces, since that's what
-  `--decimate-ratio` is for);
+  `--decimate-ratio` is for), convert every texture to WebP (`--webp`, glb/gltf output only,
+  adds `EXT_texture_webp`) -- reports the file's own real before/after texture bytes rather than
+  assuming a reduction, because WebP at Blender's own default quality can end up *larger* than a
+  well-compressed PNG for some textures (confirmed, not hypothetical -- see
+  `references/pitfalls.md`; `--webp-quality` gives a lever to actually shrink when that happens);
   `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
