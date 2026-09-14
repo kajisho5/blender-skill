@@ -28,6 +28,7 @@ ROOT_MOTION_FIXTURE = ROOT / "tests" / "fixtures" / "root_motion_rig.blend"
 UNWEIGHTED_VERTEX_FIXTURE = ROOT / "tests" / "fixtures" / "unweighted_vertex_cube.blend"
 MULTI_MATERIAL_FIXTURE = ROOT / "tests" / "fixtures" / "multi_material_cube.glb"
 MISCONFIGURED_TRANSPARENCY_FIXTURE = ROOT / "tests" / "fixtures" / "misconfigured_transparency.blend"
+DRACO_FIXTURE = ROOT / "tests" / "fixtures" / "box_draco.glb"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -318,6 +319,29 @@ class TestToolchain(unittest.TestCase):
             proc = run("info.py", str(fixture), "--json")
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(json.loads(proc.stdout)["materials"]["transparency_issues"], [])
+
+    def test_info_lists_gltf_extensions_from_the_raw_file(self):
+        # box_draco.glb: a real Draco-compressed export (via optimize.py --draco), so its
+        # extensionsUsed/extensionsRequired genuinely contain KHR_draco_mesh_compression --
+        # parsed from the file's own JSON chunk, not inferred from Blender's imported state
+        # (which doesn't expose which KHR_* extensions the source file declared).
+        proc = run("info.py", str(DRACO_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        ext = json.loads(proc.stdout)["gltf_extensions"]
+        self.assertEqual(ext["used"], ["KHR_draco_mesh_compression"])
+        self.assertEqual(ext["required"], ["KHR_draco_mesh_compression"])
+        self.assertIn("Draco", ext["descriptions"]["KHR_draco_mesh_compression"])
+
+    def test_info_reports_no_gltf_extensions_on_a_plain_glb_and_none_for_non_gltf(self):
+        proc = run("info.py", str(FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        ext = json.loads(proc.stdout)["gltf_extensions"]
+        self.assertEqual(ext["used"], [])
+        self.assertEqual(ext["required"], [])
+
+        proc = run("info.py", str(VERTEX_COLORS_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIsNone(json.loads(proc.stdout)["gltf_extensions"])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _common
 import _formats
+import _gltf_extensions
 import _run
 from _common import SkillError
 
@@ -43,6 +44,11 @@ def _summary(result: dict) -> str:
         f"  materials: {result['materials']['count']}  textures: {len(result['textures'])}  "
         f"animations: {len(result['animations'])}",
     ]
+    ext = result.get("gltf_extensions")
+    if ext and ext["used"]:
+        lines.append(f"  glTF extensions used: {', '.join(ext['used'])}")
+        if ext["required"]:
+            lines.append(f"  glTF extensions required: {', '.join(ext['required'])}")
     for w in result["warnings"]:
         lines.append(f"  warning: {w}")
     if not result["warnings"]:
@@ -76,6 +82,10 @@ def main() -> int:
         return _common.fail(SkillError(result["error"]["message"], kind=result["error"].get("kind", "internal")), as_json)
 
     data = result["data"]
+    # Read straight from the file's own JSON, never through Blender -- the importer translates
+    # KHR_* extensions into its own representation and doesn't expose which ones the source file
+    # declared (see scripts/_gltf_extensions.py's docstring).
+    data["gltf_extensions"] = _gltf_extensions.read_extensions(str(path)) if fmt == "gltf" else None
     if args.compact:
         print(json.dumps(_compact(data), sort_keys=True))
     elif args.json:
