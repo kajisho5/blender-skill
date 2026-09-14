@@ -81,11 +81,14 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   a draw-call estimate (one per distinct material a mesh object's faces actually use, not the
   cruder "material count x object count" that overestimates as soon as objects share a material),
   misconfigured-transparency detection (a hard binary-alpha mask, e.g. foliage, using real
-  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), and (glb/gltf only)
+  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), (glb/gltf only)
   the file's own `extensionsUsed`/`extensionsRequired` list read straight from its JSON -- with a
   short description per known `KHR_*`/`EXT_*` extension -- since Blender's importer translates
-  those into its own representation and doesn't expose which ones the source file declared, each
-  defect naming its fix command where a safe one exists.
+  those into its own representation and doesn't expose which ones the source file declared, and
+  duplicate-mesh/instancing detection (objects already sharing one mesh datablock, reported as
+  data; objects on *separate* datablocks with identical geometry, flagged as a real "could share
+  one datablock" memory-saving opportunity), each defect naming its fix command where a safe one
+  exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
