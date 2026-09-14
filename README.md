@@ -78,9 +78,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   with the rig -- skipped, not falsely flagged, on meshes with no armature modifier at all), a
   default LOD1/2/3 triangle-ratio suggestion (50%/25%/10% of the file's current total, with the
   `optimize.py --decimate-ratio` command for each -- a starting-point estimate, not a guarantee),
-  and a draw-call estimate (one per distinct material a mesh object's faces actually use, not the
+  a draw-call estimate (one per distinct material a mesh object's faces actually use, not the
   cruder "material count x object count" that overestimates as soon as objects share a material),
-  each defect naming its fix command where a safe one exists.
+  and misconfigured-transparency detection (a hard binary-alpha mask, e.g. foliage, using real
+  alpha blending instead of the cheaper, sorting-artifact-free dithered mode), each defect naming
+  its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
