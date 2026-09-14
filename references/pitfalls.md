@@ -364,6 +364,22 @@ because a broken package fails to even *import* into Blender, the negative case 
 exercised by testing `scripts/_usdz_validate.py` directly, not through `check.py`'s CLI
 end-to-end (info.py, which check.py always runs first, fails before this row would run).
 
+## Blender's OBJ importer's Ns->roughness conversion is a fixed, testable formula
+
+OBJ/MTL predates physically-based rendering entirely -- it only has the old Phong/Blinn-Phong
+ambient/diffuse/specular/shininess model (`Ka`/`Kd`/`Ks`/`Ns`), no metallic or roughness channel.
+Confirmed on real Blender 4.2.23 (`wm.obj_import`) across `Ns` = 0, 5, 90, 200, 1000: the
+resulting Principled BSDF's Roughness input reads exactly `1 - sqrt(clamp(Ns, 0, 1000) / 1000)`
+every time (Ns=0 -> roughness 1.0, Ns=1000 -> roughness 0.0, Ns=200 -> 0.5527864..., matching to
+float32 precision). Metallic is always left at 0.0 -- Blender's own importer never attempts to
+guess it from Phong parameters, and RM-018's own `scripts/_obj_mtl.py` deliberately doesn't
+either: there's no reliable signal in `Ka`/`Kd`/`Ks`/`Ns` alone that separates a metal from a
+very shiny dielectric, so guessing would trade a known, honestly-reported gap for an unverifiable
+claim. Confirmed end-to-end too: converting a `.obj`/`.mtl` fixture through `convert.py` to
+`.glb` and reading back the exported `pbrMetallicRoughness.roughnessFactor` matches this same
+formula exactly -- the heuristic `info.py` reports isn't just a formula in isolation, it's what
+this skill's own pipeline actually produces.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

@@ -31,11 +31,13 @@ MISCONFIGURED_TRANSPARENCY_FIXTURE = ROOT / "tests" / "fixtures" / "misconfigure
 DRACO_FIXTURE = ROOT / "tests" / "fixtures" / "box_draco.glb"
 DUPLICATE_MESH_FIXTURE = ROOT / "tests" / "fixtures" / "duplicate_mesh_scene.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
+import _obj_mtl  # noqa: E402
 import _run  # noqa: E402
 import _usdz_validate  # noqa: E402
 
 USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box.usdz"
 BROKEN_USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box_broken.usdz"
+PHONG_OBJ_FIXTURE = ROOT / "tests" / "fixtures" / "phong_materials.obj"
 
 
 def _blender_available() -> bool:
@@ -79,6 +81,29 @@ class TestUsdzValidate(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertFalse(result["entries"][0]["stored"])
         self.assertFalse(result["entries"][0]["aligned"])
+
+
+class TestObjMtl(unittest.TestCase):
+    """No Blender needed -- _obj_mtl reads the raw .obj/.mtl files directly."""
+
+    def test_ns_to_roughness_matches_blenders_own_obj_importer(self):
+        # phong_materials.obj/.mtl: ShinyPlastic (Ns=200) and RoughMatte (Ns=5) -- roughness
+        # values here are 1 - sqrt(Ns/1000), confirmed byte-for-byte against what Blender's own
+        # wm.obj_import actually assigns to Principled BSDF's Roughness input for these exact Ns
+        # values (0.5527864.../0.9292893... within float32 rounding).
+        materials = _obj_mtl.read_materials(str(PHONG_OBJ_FIXTURE))
+        by_name = {m["name"]: m for m in materials}
+        self.assertAlmostEqual(by_name["ShinyPlastic"]["pbr_heuristic"]["roughness"], 0.5527864098548889, places=5)
+        self.assertAlmostEqual(by_name["RoughMatte"]["pbr_heuristic"]["roughness"], 0.9292893409729004, places=5)
+        # OBJ/MTL has no metallic channel -- never guessed, always 0.0.
+        self.assertEqual(by_name["ShinyPlastic"]["pbr_heuristic"]["metallic"], 0.0)
+        self.assertEqual(by_name["ShinyPlastic"]["pbr_heuristic"]["base_color"], [0.8, 0.2, 0.2])
+
+    def test_returns_none_without_a_mtllib_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            obj = Path(tmp) / "no_mtl.obj"
+            obj.write_text("v 0 0 0\nv 1 0 0\nv 1 1 0\nf 1 2 3\n")
+            self.assertIsNone(_obj_mtl.read_materials(str(obj)))
 
 
 @unittest.skipUnless(_blender_available(), "no Blender found (see scripts/_run.py's search order)")
@@ -415,6 +440,33 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stderr)  # UV-map FAIL on box.glb's unwrapped cube, unrelated to this row
         rows = {r["check"]: r for r in json.loads(proc.stdout)["checks"]}
         self.assertEqual(rows["USDZ package"]["status"], "PASS")
+
+    def test_info_reports_obj_pbr_heuristic_matching_the_real_blender_import(self):
+        proc = run("info.py", str(PHONG_OBJ_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        by_name = {m["name"]: m for m in data["obj_materials"]}
+        self.assertAlmostEqual(by_name["ShinyPlastic"]["pbr_heuristic"]["roughness"], 0.5527864098548889, places=5)
+        # Convert the same file through Blender and read back the actual glTF
+        # pbrMetallicRoughness.roughnessFactor it wrote, confirming info.py's reported heuristic
+        # isn't just an isolated formula but genuinely matches what this skill's own convert.py
+        # pipeline produces end to end.
+        out = self.out / "phong.glb"
+        proc = run("convert.py", str(PHONG_OBJ_FIXTURE), "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        import struct as _struct
+        with open(out, "rb") as f:
+            _magic, _version, _length = _struct.unpack("<4sII", f.read(12))
+            chunk_len, _chunk_type = _struct.unpack("<II", f.read(8))
+            gltf = json.loads(f.read(chunk_len))
+        exported = {m["name"]: m["pbrMetallicRoughness"]["roughnessFactor"] for m in gltf["materials"]}
+        self.assertAlmostEqual(exported["ShinyPlastic"], by_name["ShinyPlastic"]["pbr_heuristic"]["roughness"], places=5)
+        self.assertAlmostEqual(exported["RoughMatte"], by_name["RoughMatte"]["pbr_heuristic"]["roughness"], places=5)
+
+    def test_info_reports_none_obj_materials_for_non_obj_formats(self):
+        proc = run("info.py", str(FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIsNone(json.loads(proc.stdout)["obj_materials"])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
