@@ -19,6 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "box.glb"
 BROKEN_FIXTURE = ROOT / "tests" / "fixtures" / "broken_cube.glb"
 FLIPPED_FIXTURE = ROOT / "tests" / "fixtures" / "flipped_cube.glb"
+SCALED_FIXTURE = ROOT / "tests" / "fixtures" / "scaled_cube.glb"
+OFFSET_ORIGIN_FIXTURE = ROOT / "tests" / "fixtures" / "offset_origin_cube.glb"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -100,6 +102,51 @@ class TestToolchain(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual(len(data["warnings"]), 1)
         self.assertIn("non-manifold", data["warnings"][0])
+
+    def test_info_detects_unapplied_scale_and_optimize_fixes_it(self):
+        # scaled_cube.glb: a cube with object.scale (0.01, 0.01, 0.01) never baked in -- the
+        # classic cm/m unit-mismatch symptom, which glTF round-trips faithfully as a node scale
+        # rather than silently applying it.
+        proc = run("info.py", str(SCALED_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        stats = data["meshes"]["per_object"][0]
+        self.assertAlmostEqual(stats["scale"][0], 0.01, places=4)
+        self.assertTrue(any("unapplied scale" in w for w in data["warnings"]))
+
+        out = self.out / "scale_fixed.glb"
+        proc = run("optimize.py", str(SCALED_FIXTURE), "-o", str(out), "--fix-scale", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["scales_fixed"], 1)
+
+        verify = run("info.py", str(out), "--json")
+        fixed_stats = json.loads(verify.stdout)["meshes"]["per_object"][0]
+        self.assertEqual(fixed_stats["scale"], [1.0, 1.0, 1.0])
+
+    def test_optimize_origin_center_and_bottom_recenter_without_moving_geometry(self):
+        # offset_origin_cube.glb: a cube whose origin sits 3 units away from its own geometry's
+        # local center (a deliberately off-center pivot, not a defect -- info.py reports this as
+        # data, not a warning; see _local_bbox_reference_points in scripts/bpy/info.py).
+        before = json.loads(run("info.py", str(OFFSET_ORIGIN_FIXTURE), "--json").stdout)
+        self.assertEqual(before["meshes"]["per_object"][0]["origin_offset_from_center"], [3.0, 0.0, 0.0])
+        world_bbox_before = before["bounding_box"]
+
+        out = self.out / "origin_center.glb"
+        proc = run("optimize.py", str(OFFSET_ORIGIN_FIXTURE), "-o", str(out), "--origin", "center", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        after = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(after["meshes"]["per_object"][0]["origin_offset_from_center"], [0.0, 0.0, 0.0])
+        # The whole point of origin_set over moving the object: world-space geometry is
+        # untouched, only the origin moves within the object's local frame.
+        self.assertEqual(after["bounding_box"], world_bbox_before)
+
+        out_bottom = self.out / "origin_bottom.glb"
+        proc = run("optimize.py", str(OFFSET_ORIGIN_FIXTURE), "-o", str(out_bottom), "--origin", "bottom", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        after_bottom = json.loads(run("info.py", str(out_bottom), "--json").stdout)
+        self.assertEqual(after_bottom["meshes"]["per_object"][0]["origin_offset_from_bottom_center"], [0.0, 0.0, 0.0])
+        self.assertEqual(after_bottom["bounding_box"], world_bbox_before)
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

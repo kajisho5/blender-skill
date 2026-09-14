@@ -11,6 +11,7 @@ import _compat
 
 import bmesh
 import bpy
+import mathutils
 
 # Opinionated defaults, not a spec any external authority publishes -- texture caps and decimate
 # ratios a reasonable default for that destination, meant to be overridden with the specific
@@ -103,6 +104,55 @@ def _resize_textures(max_size: int) -> list:
     return resized
 
 
+def _fix_scale(obj) -> bool:
+    """Bakes obj.scale into the mesh data (bpy.ops.object.transform_apply(scale=True)), leaving
+    world-space size/position unchanged -- confirmed: an object with scale (0.01, 0.01, 0.01)
+    (the classic cm/m-mismatch symptom) and world dimensions (2, 2, 2) keeps those same world
+    dimensions and ends up with scale (1, 1, 1) afterward. Returns whether anything changed.
+    """
+    if all(abs(s - 1.0) <= 1e-4 for s in obj.scale):
+        return False
+    bpy.context.view_layer.objects.active = obj
+    for o in bpy.context.selected_objects:
+        o.select_set(False)
+    obj.select_set(True)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    return True
+
+
+def _set_origin(obj, mode: str) -> None:
+    """Moves the object's origin without moving its geometry in world space (confirmed: the
+    object's world-space bounding box corners are identical before/after, only obj.location and
+    the mesh's local coordinates change to compensate).
+
+    - center: Blender's own bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS'),
+      the bounding-box center.
+    - bottom: no built-in Blender op for this specifically -- placing the 3D cursor at the
+      world-space bounding-box bottom-center, then origin_set(type='ORIGIN_CURSOR'), is the
+      standard technique (confirmed: restores the saved cursor position afterward so this has no
+      side effect on the scene beyond the target object).
+    """
+    bpy.context.view_layer.objects.active = obj
+    for o in bpy.context.selected_objects:
+        o.select_set(False)
+    obj.select_set(True)
+    if mode == "center":
+        bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+        return
+    if mode == "bottom":
+        corners = [obj.matrix_world @ mathutils.Vector(c) for c in obj.bound_box]
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        zs = [c.z for c in corners]
+        bottom_center = mathutils.Vector(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, min(zs)))
+        saved_cursor = bpy.context.scene.cursor.location.copy()
+        bpy.context.scene.cursor.location = bottom_center
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+        bpy.context.scene.cursor.location = saved_cursor
+        return
+    raise ValueError(f"unknown --origin mode {mode!r} (center, bottom)")
+
+
 def _has_non_manifold(obj) -> bool:
     """Same welded (dist=1e-6) non-manifold check info.py's diagnostic uses -- reused here so
     --recalc-normals can warn instead of silently corrupting a mesh it can't reliably fix. See
@@ -143,8 +193,11 @@ def run(args):
 
     welded_total = 0
     holes_filled_total = 0
+    scales_fixed_total = 0
     warnings = []
     for o in mesh_objs:
+        if args.get("fix_scale") and _fix_scale(o):
+            scales_fixed_total += 1
         if args.get("fill_holes"):
             holes_filled_total += _fill_holes(o)
         if args.get("recalc_normals") and _has_non_manifold(o):
@@ -161,6 +214,8 @@ def run(args):
         if decimate_ratio and 0 < decimate_ratio < 1:
             bpy.context.view_layer.objects.active = o
             _decimate(o, decimate_ratio)
+        if args.get("origin") and args["origin"] != "keep":
+            _set_origin(o, args["origin"])
 
     resized = _resize_textures(texture_max) if texture_max else []
     purged = _purge_unused() if args.get("purge_unused") else 0
@@ -173,6 +228,7 @@ def run(args):
         "triangles_after": after_tris,
         "vertices_welded": welded_total,
         "holes_filled": holes_filled_total,
+        "scales_fixed": scales_fixed_total,
         "textures_resized": resized,
         "orphan_data_purged": purged,
         "output_path": args["output"],
