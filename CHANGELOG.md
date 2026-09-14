@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.6.0...blender-skill-v0.7.0) (2026-09-14)
+
+
+### Features
+
+* **info:** animation clip bone count and root-motion detection (RM-008) ([#108](https://github.com/kajisho5/blender-skill/issues/108)) ([fbd0d83](https://github.com/kajisho5/blender-skill/commit/fbd0d8374a00bdd3f21657912c9e51e4746c2771))
+
 ## [0.6.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.5.0...blender-skill-v0.6.0) (2026-09-14)
 
 
