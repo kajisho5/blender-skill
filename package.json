@@ -1,6 +1,6 @@
 {
   "name": "blender-skill",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Agent Skill that gives coding agents (Claude Code, Cursor, Codex) a local 3D asset pipeline: inspect, convert, optimize, render, bake and validate glb/gltf/fbx/obj/stl/usd/usdz/ply/abc/.blend files via headless Blender. No API keys, no cloud, no pip dependencies.",
   "keywords": [
     "blender",
