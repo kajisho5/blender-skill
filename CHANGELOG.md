@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.14.0...blender-skill-v0.15.0) (2026-09-14)
+
+
+### Features
+
+* **info:** report OBJ/MTL Phong-to-PBR conversion heuristic (RM-018) ([#125](https://github.com/kajisho5/blender-skill/issues/125)) ([775b62d](https://github.com/kajisho5/blender-skill/commit/775b62da7b438c05d7aa3fbcb3dd0cddaf0a6665))
+
 ## [0.14.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.13.0...blender-skill-v0.14.0) (2026-09-14)
 
 
