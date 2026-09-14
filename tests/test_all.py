@@ -266,6 +266,15 @@ class TestToolchain(unittest.TestCase):
         for stats in json.loads(proc.stdout)["meshes"]["per_object"]:
             self.assertIsNone(stats["unweighted_vertices"])
 
+    def test_info_suggests_lod_ratios_from_triangle_count(self):
+        # box.glb: 12 triangles -- LOD1/2/3 at 50%/25%/10% of that (real numbers: 6/3/1).
+        proc = run("info.py", str(FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["meshes"]["triangles"], 12)
+        suggestions = {s["level"]: s["target_triangles"] for s in data["meshes"]["lod_suggestions"]}
+        self.assertEqual(suggestions, {"LOD1": 6, "LOD2": 3, "LOD3": 1})
+
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
         # exactly. STL has no index buffer at all (every triangle stores 3 independent

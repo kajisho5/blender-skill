@@ -75,8 +75,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   (whether the armature's own root bone's `location` channel actually moves, vs. an in-place
   cycle meant to be driven by a character controller), bone hierarchy (name/parent per bone) and
   unweighted-vertex detection on skinned meshes (a vertex with no bone weight at all won't move
-  with the rig -- skipped, not falsely flagged, on meshes with no armature modifier at all), each
-  defect naming its fix command where a safe one exists.
+  with the rig -- skipped, not falsely flagged, on meshes with no armature modifier at all), and
+  a default LOD1/2/3 triangle-ratio suggestion (50%/25%/10% of the file's current total, with the
+  `optimize.py --decimate-ratio` command for each -- a starting-point estimate, not a guarantee),
+  each defect naming its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
