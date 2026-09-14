@@ -256,6 +256,25 @@ Building that fixture surfaced a separate, unrelated gotcha: an action assigned 
 `action.use_fake_user = True` set *before* unlinking it, or a test fixture meant to hold multiple
 actions on one armature will silently end up with only the most recently active one.
 
+## An "unweighted vertex" check needs gating on having an armature modifier at all
+
+`vertex.groups` sums to 0 for *any* vertex with no bone weight -- but a mesh that was never
+meant to be skinned (a static prop, an eye mesh moved by its own object transform rather than
+vertex weights) has *zero* vertex groups and no Armature modifier, so every one of its vertices
+reads "unweighted" too. Confirmed on fox.glb: the rigged "fox" mesh correctly reads 0/1728
+unweighted; its unrigged "Icosphere" eye mesh has 42/42 vertices with no group at all -- gating
+the check on `any(m.type == "ARMATURE" for m in obj.modifiers)` and reporting `None` (not 0, not
+every vertex) for a non-skinned mesh is what makes this a real defect signal instead of noise on
+every asset that mixes rigged and static parts.
+
+Building the positive-case test fixture surfaced a separate gotcha:
+`bpy.ops.object.parent_set(type='ARMATURE_AUTO')` bone-heat-weights *every* vertex of the mesh
+into the new vertex group as part of parenting -- so `vertex_group.add([target_indices], 1.0,
+'REPLACE')` on a *subset* of vertices does not leave the others unweighted, it just re-adds them
+at the same weight they already had. Getting a genuinely unweighted vertex requires explicitly
+`vertex_group.remove([index])` after auto-parenting, not merely omitting that index from a
+weight-assignment call.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

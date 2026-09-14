@@ -25,6 +25,7 @@ ZERO_AREA_UV_FIXTURE = ROOT / "tests" / "fixtures" / "zero_area_uv_cube.glb"
 OVERLAPPING_UV_FIXTURE = ROOT / "tests" / "fixtures" / "overlapping_uv_cubes.glb"
 VERTEX_COLORS_FIXTURE = ROOT / "tests" / "fixtures" / "vertex_colors_cube.blend"
 ROOT_MOTION_FIXTURE = ROOT / "tests" / "fixtures" / "root_motion_rig.blend"
+UNWEIGHTED_VERTEX_FIXTURE = ROOT / "tests" / "fixtures" / "unweighted_vertex_cube.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -233,6 +234,37 @@ class TestToolchain(unittest.TestCase):
         self.assertTrue(animations["RootMotionWalk"]["root_motion"])
         self.assertEqual(animations["InPlaceIdle"]["bone_count"], 1)
         self.assertFalse(animations["InPlaceIdle"]["root_motion"])
+
+    def test_info_reports_bone_hierarchy(self):
+        # fox.glb: 24 bones, root "_rootJoint" with no parent, everything else chained under it
+        # (confirmed real numbers -- b_Root_00 -> _rootJoint -> None).
+        proc = run("info.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        armatures = json.loads(proc.stdout)["armatures"]
+        self.assertEqual(len(armatures), 1)
+        bones = {b["name"]: b["parent"] for b in armatures[0]["bones"]}
+        self.assertEqual(len(bones), 24)
+        self.assertIsNone(bones["_rootJoint"])
+        self.assertEqual(bones["b_Root_00"], "_rootJoint")
+
+    def test_info_detects_unweighted_vertex_on_a_skinned_mesh(self):
+        # unweighted_vertex_cube.blend: a cube parented to a 1-bone armature (auto-weighted),
+        # with vertex 0's weight explicitly removed afterward -- a real "won't move with the
+        # rig" defect, distinct from a mesh that was never meant to be skinned at all.
+        proc = run("info.py", str(UNWEIGHTED_VERTEX_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        stats = data["meshes"]["per_object"][0]
+        self.assertEqual(stats["unweighted_vertices"], 1)
+        self.assertTrue(any("no bone weight" in w for w in data["warnings"]))
+
+    def test_info_skips_unweighted_check_on_non_skinned_meshes(self):
+        # box.glb has no armature at all -- unweighted_vertices must be None (not skipped
+        # silently as 0, and not every vertex flagged as a false-positive defect).
+        proc = run("info.py", str(FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for stats in json.loads(proc.stdout)["meshes"]["per_object"]:
+            self.assertIsNone(stats["unweighted_vertices"])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
