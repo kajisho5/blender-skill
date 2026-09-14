@@ -62,9 +62,9 @@ preview).
 
 | Script | Does |
 |---|---|
-| `info.py FILE` | Object/mesh/material/texture/animation/armature counts, unit scale, bounding box, non-manifold-edge and duplicate-vertex detection, UV presence. The foundation every other script leans on. |
+| `info.py FILE` | Object/mesh/material/texture/animation/armature counts, unit scale, bounding box, non-manifold-edge and duplicate-vertex detection, approximate self-intersection detection, flipped-normal detection (skipped, not guessed, when non-manifold edges make it unreliable), UV presence. The foundation every other script leans on. |
 | `convert.py FILE -o OUT [--verify]` | Cross-format conversion: glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend. |
-| `optimize.py FILE -o OUT [--decimate-ratio R] [--weld-doubles] [--recalc-normals] [--triangulate] [--texture-max PX] [--purge-unused] [--target-web\|--target-mobile\|--target-ar] [--draco\|--meshopt] [--ktx2]` | Shrink triangle count, texture size, and orphan data; `--draco`/`--meshopt`/`--ktx2` delegate to gltf-transform (and, for `--ktx2`, the KTX-Software `ktx` CLI) if installed, otherwise say so and skip just that step. |
+| `optimize.py FILE -o OUT [--decimate-ratio R] [--weld-doubles] [--fill-holes] [--recalc-normals] [--triangulate] [--texture-max PX] [--purge-unused] [--target-web\|--target-mobile\|--target-ar] [--draco\|--meshopt] [--ktx2]` | Shrink triangle count, texture size, and orphan data; fill boundary-edge holes; `--draco`/`--meshopt`/`--ktx2` delegate to gltf-transform (and, for `--ktx2`, the KTX-Software `ktx` CLI) if installed, otherwise say so and skip just that step. `--recalc-normals` warns rather than trusting itself on a still-non-manifold mesh -- fix holes first. |
 | `render.py FILE -o OUT [--turntable] [--sheet] [--cycles] [--light studio\|outdoor]` | Thumbnail (default), 360° turntable (PNG sequence or FFmpeg-encoded video), or a 4-view sheet. |
 | `look.py FILE --uv\|--wireframe\|--textures -o OUT` / `look.py --compare A B -o OUT` | The agent's eyes: UV layout (SVG), a wireframe render, a texture grid, or a before/after comparison. |
 | `check.py FILE --target NAME` | PASS/WARN/FAIL against a delivery target's budget, with a fix command per row. |
@@ -90,10 +90,13 @@ creative or content-understanding judgements:
 - **Picking a subject, crop, or region not given explicitly** -- every script's parameters are
   mechanical once known (a decimate ratio, a texture cap, a bake pass); choosing *what value* to
   use for an ambiguous request belongs to the calling agent, from `info.py`'s real numbers.
-- **UV unwrapping or manifold/topology repair** -- `check.py` detects a missing UV map or
-  non-manifold geometry and says so; this skill does not (yet -- see ROADMAP.md) fix either
-  automatically. Say what's wrong and point at Blender's own UV/3D-Print tools rather than
-  guessing a fix.
+- **UV unwrapping** -- `check.py`/`info.py` detect a missing UV map and say so; this skill does
+  not (yet -- see ROADMAP.md) unwrap one automatically. Say what's wrong and point at Blender's
+  own UV tools rather than guessing a fix.
+- **Non-manifold/topology repair beyond a simple hole** -- `optimize.py --fill-holes` closes a
+  boundary-edge hole/gap; it does not touch non-manifold edges shared by 3+ faces or fix
+  self-intersecting geometry (`info.py` flags both, with no safe automatic repair for either).
+  Say what's wrong and point at Blender's own mesh-cleanup tools rather than guessing a fix.
 
 If a request needs a Blender feature none of these scripts expose, say so and name the closest
 built-in option -- never hand-write a raw `bpy` script outside `scripts/bpy/*.py` as a fallback.

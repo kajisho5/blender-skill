@@ -111,6 +111,54 @@ a `ktx` binary from KTX-Software (the current unified CLI; older docs may refere
 project's now-superseded standalone `toktx`). Having `gltf-transform` on PATH is not enough to
 assume KTX2 support is available; check for `ktx` separately (`_delegate.ktx_available()`).
 
+## Self-intersection detection must compare face adjacency by position, not vertex index
+
+`mathutils.bvhtree.BVHTree.overlap(tree, tree)` finds every pair of triangles whose bounding
+boxes touch, which includes every ordinary adjacent-face pair sharing an edge -- the obvious
+filter is "skip pairs that share a vertex", but on a real glTF/FBX import a vertex is split per
+unique normal/UV at every hard edge (same root cause as the non-manifold note above), so two
+genuinely-adjacent triangles almost never share a vertex *index* even though they share a
+position. Filtering by index alone produced 4 false "self-intersections" on
+`tests/fixtures/box.glb` (a plain watertight cube) and 115 on `tests/fixtures/fox.glb` -- filtering
+by rounded vertex *position* instead correctly reads 0 for both while still catching a real case
+(two overlapping cubes joined into one object: 8 genuinely-intersecting triangle pairs, agreed on
+by both filtering methods). `info.py`'s `self_intersecting_faces_approx` uses position filtering;
+treat the count as "worth a manual look" regardless -- it's still bounding-box overlap, not exact
+triangle-triangle intersection.
+
+## Recalculating normals can corrupt an already-correct non-manifold mesh
+
+`bmesh.ops.recalc_face_normals()` (what `optimize.py --recalc-normals` uses) and the edit-mode
+`bpy.ops.mesh.normals_make_consistent(inside=False)` (Blender's own "Recalculate Normals" menu
+command) both rely on a flood-fill across shared manifold edges to propagate a consistent
+"outside" direction. On a fully closed, single-shell mesh this is reliable (confirmed: a cube with
+every normal manually inverted is fixed 6/6, an unmodified cube is untouched, and a sphere with a
+chunk of faces removed -- non-manifold, but still one shell -- is correctly left alone, 0/118
+false positives). It is NOT reliable once separate parts of the mesh are joined only by
+non-manifold junctions rather than shared manifold edges, which is common in real rigged
+character meshes: confirmed on `tests/fixtures/fox.glb` (1150 non-manifold edges) -- both
+recalculation methods flip roughly half the mesh's faces (299 of 576), and actually applying the
+"fix" and re-rendering turns a cleanly, correctly-shaded fox into a black/white patchwork (i.e.
+the *original* normals were already correct; recalculation broke them). General lesson: only
+trust a normal-recalculation *comparison* (info.py's `flipped_normal_faces`) -- and only apply
+`--recalc-normals` as an actual fix -- when the mesh has zero non-manifold edges; `info.py`
+reports `flipped_normal_faces: null` and `optimize.py --recalc-normals` prints an explicit warning
+instead of guessing when that's not the case. Fill real holes first (`--fill-holes`) and re-check.
+
+## Filling holes needs the same weld-before-detect fix as non-manifold detection
+
+`bmesh.ops.holes_fill()` finds boundary loops via `edge.is_boundary`, which has the identical
+split-vertex problem as the non-manifold check above: on a raw glTF import, a single missing quad
+face reads as *16* boundary edges (one per unrelated triangle corner) instead of the real 4-edge
+loop, because no two of those edges' vertices are the same BMVert object -- `holes_fill` finds no
+closed loop and silently fills nothing (confirmed: 0 faces added, hole still open). Welding
+coincident-position vertices first (same `remove_doubles(dist=1e-6)` info.py's diagnostic already
+uses) collapses it to the true 8-vertex/4-edge topology and `holes_fill` then works correctly (1
+face added, mesh fully closed). This does not flatten the mesh's hard-edge shading elsewhere:
+bmesh keeps UV/custom-normal data per face-corner (loop), not per vertex, so a re-export still
+re-splits vertices the same way the original file was authored. `optimize.py --fill-holes` always
+welds before scanning for holes, whether or not one is actually present.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

@@ -17,6 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "box.glb"
+BROKEN_FIXTURE = ROOT / "tests" / "fixtures" / "broken_cube.glb"
+FLIPPED_FIXTURE = ROOT / "tests" / "fixtures" / "flipped_cube.glb"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -51,6 +53,53 @@ class TestToolchain(unittest.TestCase):
         # A closed cube is manifold once split normals/UV seams are welded first (info.py's
         # whole point: raw topology alone would call every hard edge "non-manifold").
         self.assertEqual(data["meshes"]["per_object"][0]["non_manifold_edges"], 0)
+
+    def test_info_detects_hole_and_skips_unreliable_flip_check(self):
+        # broken_cube.glb: a cube with one face deleted (a real hole/gap) and one remaining
+        # face's normal manually inverted. The hole makes the mesh non-manifold, which in turn
+        # makes the flipped-normal comparison unreliable (see references/pitfalls.md -- verified
+        # on a real character mesh that "fixing" flipped normals on a non-manifold mesh can
+        # actually corrupt a correctly-shaded model), so info.py must report that check as
+        # skipped (None) rather than guessing.
+        proc = run("info.py", str(BROKEN_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        stats = json.loads(proc.stdout)["meshes"]["per_object"][0]
+        self.assertEqual(stats["non_manifold_edges"], 4)
+        self.assertEqual(stats["boundary_edges"], 4)
+        self.assertIsNone(stats["flipped_normal_faces"])
+
+    def test_info_detects_flipped_normals_on_a_manifold_mesh(self):
+        # flipped_cube.glb: a plain closed cube with every face normal manually inverted --
+        # manifold (no holes), so the flipped-normal check is trustworthy here and should fire.
+        proc = run("info.py", str(FLIPPED_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        stats = json.loads(proc.stdout)["meshes"]["per_object"][0]
+        self.assertEqual(stats["non_manifold_edges"], 0)
+        self.assertEqual(stats["flipped_normal_faces"], 12)
+
+    def test_optimize_fill_holes_and_recalc_normals_fixes_broken_cube(self):
+        out = self.out / "fixed.glb"
+        proc = run("optimize.py", str(BROKEN_FIXTURE), "-o", str(out), "--fill-holes", "--recalc-normals", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["holes_filled"], 1)
+        self.assertEqual(data["warnings"], [])  # mesh was manifold again before recalc ran
+
+        verify = run("info.py", str(out), "--json")
+        stats = json.loads(verify.stdout)["meshes"]["per_object"][0]
+        self.assertEqual(stats["non_manifold_edges"], 0)
+        self.assertEqual(stats["flipped_normal_faces"], 0)
+
+    def test_optimize_recalc_normals_warns_on_non_manifold_mesh(self):
+        # Applying --recalc-normals directly to a still-non-manifold mesh (no --fill-holes first)
+        # must warn rather than silently trust the result -- this is the same unreliable-fix
+        # case test_info_detects_hole_and_skips_unreliable_flip_check guards on the read side.
+        out = self.out / "still_broken.glb"
+        proc = run("optimize.py", str(BROKEN_FIXTURE), "-o", str(out), "--recalc-normals", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["warnings"]), 1)
+        self.assertIn("non-manifold", data["warnings"][0])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
