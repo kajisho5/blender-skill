@@ -134,6 +134,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   assuming a reduction, because WebP at Blender's own default quality can end up *larger* than a
   well-compressed PNG for some textures (confirmed, not hypothetical -- see
   `references/pitfalls.md`; `--webp-quality` gives a lever to actually shrink when that happens);
+  `--texture-auto-resolution` computes a per-texture cap instead of one flat `--texture-max`,
+  from how much of the whole file's combined bounding box the largest object using that texture
+  spans -- a real, data-driven screen-occupancy proxy this skill has no way to get from an actual
+  camera/FOV, times `--viewport-width` (default 1920), rounded to the next power of two;
   `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say

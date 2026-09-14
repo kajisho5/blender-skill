@@ -1,6 +1,12 @@
 """bpy side of optimize.py: decimate, weld, recalc normals, triangulate, cap texture size,
 purge unused data blocks -- each independently toggleable, plus three presets that bundle
 sensible defaults for a destination.
+
+Strips Blender's own synthesized bone-shape display widget after import (see
+_compat.strip_import_helper_objects and references/pitfalls.md) -- without it, a skinned
+armature input's reported triangles_before/triangles_after were inflated by the widget's own
+triangles (confirmed on fox.glb: 656 instead of the real 576), and --texture-auto-resolution's
+scene-bounding-box calculation would be skewed by an object that isn't really part of the asset.
 """
 import sys
 from pathlib import Path
@@ -103,6 +109,88 @@ def _resize_textures(max_size: int) -> list:
         img.scale(new_w, new_h)
         resized.append({"name": img.name, "from": [w, h], "to": [new_w, new_h]})
     return resized
+
+
+def _resize_textures_per_image(caps: dict) -> list:
+    """Like _resize_textures, but each image has its own max dimension (from `caps`, keyed by
+    image name) instead of one global cap. An image not present in `caps` at all (not
+    referenced by any mesh object's material this skill's own traversal found) is left
+    untouched -- never guess a cap for something with no real usage signal."""
+    resized = []
+    for img in bpy.data.images:
+        if img.name in ("Render Result", "Viewer Node"):
+            continue
+        max_size = caps.get(img.name)
+        if not max_size:
+            continue
+        len(img.pixels)
+        w, h = img.size
+        if max(w, h) <= max_size:
+            continue
+        scale = max_size / max(w, h)
+        new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
+        img.scale(new_w, new_h)
+        resized.append({"name": img.name, "from": [w, h], "to": [new_w, new_h], "cap": max_size})
+    return resized
+
+
+def _combined_bounding_diameter(objs) -> float:
+    """World-space bounding-box diagonal across every object in `objs` combined (0.0 if empty)."""
+    xs, ys, zs = [], [], []
+    for obj in objs:
+        for c in obj.bound_box:
+            world = obj.matrix_world @ mathutils.Vector(c)
+            xs.append(world.x)
+            ys.append(world.y)
+            zs.append(world.z)
+    if not xs:
+        return 0.0
+    return ((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2 + (max(zs) - min(zs)) ** 2) ** 0.5
+
+
+def _next_pow2(n: int) -> int:
+    p = 1
+    while p < n:
+        p *= 2
+    return p
+
+
+def _image_users(mesh_objs) -> dict:
+    """image name -> list of mesh objects whose material graph references it, via any Image
+    Texture node (not scoped to a particular BSDF socket, unlike info.py's colorspace check --
+    here every use counts, since the question is just "does this object need this texture at
+    all", not "which specific input does it feed")."""
+    users = {}
+    for obj in mesh_objs:
+        for slot in obj.material_slots:
+            mat = slot.material
+            if not mat or not mat.use_nodes or not mat.node_tree:
+                continue
+            for node in mat.node_tree.nodes:
+                if node.type == "TEX_IMAGE" and node.image:
+                    users.setdefault(node.image.name, []).append(obj)
+    return users
+
+
+def _auto_texture_max(mesh_objs, viewport_width: int) -> dict:
+    """image name -> an ideal max dimension (next power of two), derived from how much of the
+    *whole scene's own combined bounding box* the largest object using that texture spans --
+    screen-occupancy as a data-driven proxy, not an assumed camera/FOV this skill has no way to
+    know. A single-object file gets fraction 1.0 (its texture could fill the whole assumed
+    viewport), which is the sensible degenerate case; a small prop sharing a scene with a much
+    larger one gets a correspondingly smaller cap than a flat --texture-max value could express.
+    Images with no mesh-object user found in `mesh_objs` (orphaned, or referenced some other way
+    this skill doesn't walk) get no entry -- never guess a cap with no real usage signal.
+    """
+    scene_diameter = _combined_bounding_diameter(mesh_objs)
+    caps = {}
+    if not scene_diameter:
+        return caps
+    for image_name, users in _image_users(mesh_objs).items():
+        obj_diameter = max(_combined_bounding_diameter([o]) for o in users)
+        fraction = min(1.0, obj_diameter / scene_diameter)
+        caps[image_name] = max(64, _next_pow2(round(viewport_width * fraction)))
+    return caps
 
 
 def _fix_scale(obj) -> bool:
@@ -255,6 +343,7 @@ def run(args):
 
     _compat.reset_scene()
     _compat.import_file(args["path"], args["format"])
+    _compat.strip_import_helper_objects()
 
     mesh_objs = [o for o in bpy.data.objects if o.type == "MESH"]
     before_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
@@ -289,7 +378,15 @@ def run(args):
         if args.get("origin") and args["origin"] != "keep":
             _set_origin(o, args["origin"])
 
-    resized = _resize_textures(texture_max) if texture_max else []
+    auto_caps = {}
+    if args.get("texture_auto_resolution"):
+        auto_caps = _auto_texture_max(mesh_objs, args.get("viewport_width") or 1920)
+    if texture_max:
+        resized = _resize_textures(texture_max)
+    elif auto_caps:
+        resized = _resize_textures_per_image(auto_caps)
+    else:
+        resized = []
     purged = _purge_unused() if args.get("purge_unused") else 0
 
     colorspace_fixed = 0
@@ -318,6 +415,7 @@ def run(args):
         "scales_fixed": scales_fixed_total,
         "points_thinned": points_thinned_total,
         "textures_resized": resized,
+        "texture_auto_caps": auto_caps,
         "orphan_data_purged": purged,
         "colorspace_fixed": colorspace_fixed,
         "texture_colorspace_changed": texture_colorspace_changed,

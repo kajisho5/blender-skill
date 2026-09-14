@@ -832,6 +832,51 @@ class TestToolchain(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertTrue(data["verify"]["matches"], data["verify"]["diffs"])
 
+    def test_optimize_texture_auto_resolution_scales_by_scene_relative_size(self):
+        # scene_scale_mix.blend: a 10-unit "BigProp" and a 1-unit "SmallProp" 20 units apart,
+        # each with its own 512x512 texture. The small object's texture should get a much
+        # smaller computed cap than the big one's -- a real, data-driven "screen occupancy"
+        # proxy (each object's own bounding-box diagonal vs. the whole scene's combined one),
+        # not just one flat number every texture in the file would share under --texture-max.
+        out = self.out / "auto_res.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "scene_scale_mix.blend"), "-o", str(out), "--texture-auto-resolution", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        caps = data["texture_auto_caps"]
+        self.assertEqual(set(caps), {"big_tex", "small_tex"})
+        self.assertGreater(caps["big_tex"], caps["small_tex"])
+        # Only small_tex actually needed downscaling from its original 512x512 (big_tex's
+        # computed cap is above 512, so it's correctly left untouched).
+        resized = {r["name"]: r for r in data["textures_resized"]}
+        self.assertEqual(set(resized), {"small_tex"})
+        self.assertEqual(resized["small_tex"]["to"], [caps["small_tex"]] * 2)
+
+    def test_optimize_texture_auto_resolution_single_object_gets_full_viewport_cap(self):
+        # fox.glb (after stripping Blender's own synthesized bone-shape widget -- see
+        # references/pitfalls.md) has exactly one real mesh object, so its own bounding box IS
+        # the whole scene's: fraction 1.0, cap = next power of two >= --viewport-width.
+        out = self.out / "auto_res_single.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--texture-auto-resolution", "--viewport-width", "1000", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["texture_auto_caps"], {"Image_0": 1024})  # next_pow2(1000)
+
+    def test_optimize_rejects_texture_max_with_texture_auto_resolution_together(self):
+        out = self.out / "conflict.glb"
+        proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--texture-max", "512", "--texture-auto-resolution")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_optimize_triangle_counts_exclude_the_synthesized_bone_shape_widget(self):
+        # The same fix split.py/anim.py/lod.py already needed (see references/pitfalls.md):
+        # fox.glb's real mesh has 576 triangles; before this fix, optimize.py's own
+        # triangles_before/after were inflated to 656 by Blender's synthesized bone-shape widget.
+        out = self.out / "fox_opt.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_before"], 576)
+        self.assertEqual(data["triangles_after"], 576)
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")
