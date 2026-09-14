@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.5.0...blender-skill-v0.6.0) (2026-09-14)
+
+
+### Features
+
+* **info:** vertex color and custom mesh attribute listing (RM-007) ([#106](https://github.com/kajisho5/blender-skill/issues/106)) ([99753e7](https://github.com/kajisho5/blender-skill/commit/99753e706f45e4c8d787d504d0cb2e6aca488fe8))
+
 ## [0.5.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.4.0...blender-skill-v0.5.0) (2026-09-14)
 
 
