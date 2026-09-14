@@ -24,12 +24,13 @@ HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
 PROTOCOL_VERSION = "2024-11-05"
 
-TOOLS = ["info", "convert", "split", "optimize", "render", "look", "check", "bake", "scene", "batch", "verify"]
+TOOLS = ["info", "convert", "split", "anim", "optimize", "render", "look", "check", "bake", "scene", "batch", "verify"]
 
 _DESCRIPTIONS = {
     "info": "Inspect a 3D file: object/mesh/material/texture/animation counts, unit scale, bounding box, non-manifold/duplicate-vertex checks, UV presence.",
     "convert": "Convert between 3D formats (glb/gltf/fbx/obj/stl/usd/usdz/ply/abc/.blend), optionally verifying the round-trip.",
     "split": "Split one multi-object file into one output file per independent object hierarchy (a root object plus every descendant it has).",
+    "anim": "Extract animation-only data (armature + actions, no mesh) from a file, or combine several files' actions onto one base character (a Mixamo-style workflow).",
     "optimize": "Decimate, weld vertices, recalc normals, triangulate, cap texture size, purge unused data.",
     "render": "Render a thumbnail, turntable animation, or 4-view sheet.",
     "look": "UV layout, wireframe render, texture grid, or before/after comparison image.",

@@ -4,9 +4,16 @@ object hierarchy (a root object -- no parent -- plus every descendant, recursive
 A literal "one file per bpy object" split would break any object that depends on another one it
 isn't parented to via the normal parent chain (most commonly a skinned mesh's Armature modifier
 target) -- confirmed on tests/fixtures/fox.glb: the "fox" mesh is parented to the "root" armature
-object, so root+fox is one hierarchy and must stay together; "Icosphere" has no parent at all and
-is its own, separate hierarchy. Splitting by root-object groups, not by individual object, is
-what keeps each output file self-contained and re-importable on its own.
+object, so root+fox is one hierarchy and must stay together. Splitting by root-object groups, not
+by individual object, is what keeps each output file self-contained and re-importable on its own.
+
+Blender's own glTF importer also synthesizes a small "Icosphere" mesh object as a shared bone
+custom-shape display widget for every skinned armature it imports (confirmed: not present in
+fox.glb's own JSON at all -- purely a viewport-visualization aid Blender creates on import,
+referenced by every pose bone's `custom_shape`; see _compat.strip_import_helper_objects and
+references/pitfalls.md). It has no parent, so without stripping it first it would be
+misidentified as its own independent hierarchy and exported as a spurious, meaningless output
+file -- stripped before grouping, below.
 """
 import sys
 from pathlib import Path
@@ -38,6 +45,10 @@ def run(args):
     _compat.reset_scene()
     _compat.import_file(args["path"], args["format"])
 
+    # Discard Blender's own synthesized bone-shape widget(s) first -- see the module docstring --
+    # before it can be misidentified as an independent object hierarchy below.
+    _compat.strip_import_helper_objects()
+
     # Blender's own glTF importer parks certain objects (confirmed: a node not reachable from
     # the file's default scene roots) in an auto-created "glTF_not_exported" collection with
     # Collection.hide_viewport = True. Unhiding that collection alone is NOT enough: even with
@@ -45,11 +56,10 @@ def run(args):
     # a use_selection=True export of that object still silently produced an empty (132-byte)
     # output -- Blender's glTF exporter excludes an object by its *collection membership*, not
     # by runtime visibility/selection state. Confirmed fix: move the object out of that
-    # collection and into the scene's root collection before exporting (tested on fox.glb's
-    # "Icosphere": 132 bytes -> 9140 bytes, a real, non-empty export). So every object is
-    # relinked into the scene's root collection here, unconditionally, rather than only
-    # unhiding -- this also sidesteps any other importer-created collection with the same kind
-    # of export-time exclusion.
+    # collection and into the scene's root collection before exporting. So every remaining
+    # object is relinked into the scene's root collection here, unconditionally, rather than
+    # only unhiding -- this also sidesteps any other importer-created collection with the same
+    # kind of export-time exclusion.
     scene_coll = bpy.context.scene.collection
     for obj in list(bpy.data.objects):
         for coll in list(obj.users_collection):

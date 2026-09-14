@@ -416,9 +416,10 @@ claiming a reduction happened.
 ## A selection-only export can silently skip an object even when it's visible and selected
 
 `split.py` (RM-027) groups a multi-object file into independent root-object hierarchies and
-exports each group via a `use_selection=True`-style call (`_compat.export_selected`). On
-fox.glb, the "Icosphere" object (no parent, its own hierarchy) exported as an empty 132-byte
-file while "root"+"fox" exported correctly. Root cause, found in stages:
+exports each group via a `use_selection=True`-style call (`_compat.export_selected`). While
+building this, an early test on fox.glb exported the "Icosphere" object (no parent, its own
+hierarchy at the time) as an empty 132-byte file while "root"+"fox" exported correctly. Root
+cause, found in stages -- object identity corrected below, but the underlying mechanism is real:
 
 1. Blender's own glTF importer places any node not reachable from the file's default scene roots
    into an auto-created **"glTF_not_exported"** collection, with `Collection.hide_viewport =
@@ -436,11 +437,49 @@ file while "root"+"fox" exported correctly. Root cause, found in stages:
 
 Confirmed fix: relink every object into the scene's root collection
 (`bpy.context.scene.collection`) before selecting/exporting, unlinking it from any other
-collection first -- not just toggling `hide_viewport`. Verified on fox.glb: the same Icosphere
-export went from 132 bytes to 9140 bytes, a real non-empty, re-importable file (`info.py`
-confirms 1 mesh object, no armature). `split.py` does this relink unconditionally for every
-object right after import, so it also sidesteps any other importer-created collection with the
-same kind of export-time exclusion, not just this one named collection.
+collection first -- not just toggling `hide_viewport`. `split.py` does this relink
+unconditionally for every object right after import, so it also sidesteps any other
+importer-created collection with the same kind of export-time exclusion, not just this one named
+collection. This is a real, general Blender export behavior worth keeping the fix for even
+though, as the next entry explains, this specific "Icosphere" object turned out not to be
+genuine file content at all -- some other file's real orphaned node could still land in the same
+collection and hit the same export-time exclusion.
+
+## fox.glb's "Icosphere" isn't in the file -- it's a bone custom-shape widget Blender synthesizes
+
+The entry above (and the original RM-027 PR) assumed "Icosphere" was an independent object
+genuinely authored in fox.glb, unreachable from the file's default scene roots. That was wrong,
+discovered while building anim.py (RM-028) and confirmed directly against the file's own data:
+
+- fox.glb's raw JSON (`struct`-parsed .glb JSON chunk, not Blender's import of it) lists exactly
+  one mesh, `"fox1"`, and no "Icosphere" node or mesh anywhere in the file.
+- Importing **any** skinned armature -- fox.glb's own real armature, a bare
+  `bpy.ops.object.armature_add()` with no mesh at all, and a separately-tested mesh+armature
+  file with all skin joints actually in use -- always produces an extra small mesh object named
+  "Icosphere" in `bpy.data.objects`, placed in "glTF_not_exported".
+- That object is assigned as **every pose bone's `custom_shape`** on the armature it was created
+  for (confirmed: iterating `armature.pose.bones`, all 24 of fox.glb's bones point their
+  `custom_shape` at this one object). It is Blender's own bone-display convenience (spheres
+  instead of the default stick shape in the viewport) synthesized fresh on every import, not
+  file content -- FBX import of the same armature does not do this at all (confirmed on the same
+  content re-exported as .fbx and reimported: no extra object), only glTF import does.
+
+Consequence: `split.py` (before this was found) treated this synthetic widget as its own
+independent hierarchy and exported it as a spurious, meaningless output file for *any* skinned
+glTF character, not just fox.glb -- a real defect, not just a documentation error, now fixed by
+detecting and discarding it (`_compat.strip_import_helper_objects`, matched by "referenced as
+some armature's pose-bone `custom_shape`", the one property that's actually true of it) before
+grouping objects into hierarchies. `anim.py --combine` (RM-028) has the same exposure -- the
+*base* file's own import synthesizes this widget too, and would otherwise leak it into an
+otherwise-clean combined character file as a spurious extra mesh -- fixed the same way,
+immediately after importing the base.
+
+Deliberately not "fixed" elsewhere: `info.py`'s own object/mesh counts for a skinned glTF file
+(fox.glb included) still include this widget, because `info.py`'s stated job is to report what
+Blender's own import actually produces -- which is genuinely what you'd see opening the file in
+Blender for further work -- not to second-guess which of those objects trace back to the
+original authored content. Only split.py and anim.py, whose whole point is reasoning about
+"independent content to re-export," needed the strip.
 
 ## Blender's bundled Python includes numpy
 
