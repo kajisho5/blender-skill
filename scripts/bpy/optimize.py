@@ -12,6 +12,7 @@ import _compat
 import bmesh
 import bpy
 import mathutils
+import info as info_mod
 
 # Opinionated defaults, not a spec any external authority publishes -- texture caps and decimate
 # ratios a reasonable default for that destination, meant to be overridden with the specific
@@ -196,6 +197,46 @@ def _thin_point_cloud(obj, voxel_size: float) -> int:
     return removed
 
 
+def _fix_colorspace(materials) -> int:
+    """Corrects every texture colorspace mismatch info.py's _colorspace_issues flags (Base
+    Color/Emission tagged wrong instead of 'sRGB'; Metallic/Roughness/Alpha/a normal map's own
+    texture tagged wrong instead of 'Non-Color') -- reuses that exact same detection so a fix
+    always matches what info.py would report as wrong, rather than a second, possibly-drifting
+    copy of the same logic."""
+    fixed = 0
+    for issue in info_mod._colorspace_issues(materials):
+        image = bpy.data.images.get(issue["image"])
+        if image is not None:
+            image.colorspace_settings.name = issue["expected"]
+            fixed += 1
+    return fixed
+
+
+def _set_all_colorspace(name: str) -> list:
+    """Force every image's colorspace tag to `name`, regardless of which socket it feeds --
+    the blunt override for a deliberate choice (e.g. 'ACEScg'/'ACES2065-1' for an ACES pipeline,
+    both real, available colorspace tags in Blender's own bundled OCIO config; ACES itself is
+    only ever a *view transform* for rendering, and Blender's stock/bundled OCIO config has no
+    ACES view transform at all -- confirmed via its own view_transform enum, which lists only
+    Standard/Khronos PBR Neutral/AgX/Filmic/Filmic Log/False Color/Raw -- so this only ever
+    covers the texture-tagging half of "ACES", not a full ACES render pipeline). Not validated
+    against a hardcoded list: Blender's own error on an unrecognized name already names every
+    real option for the OCIO config actually loaded, which can vary by Blender build/version.
+    """
+    changed = []
+    for img in bpy.data.images:
+        if img.name in ("Render Result", "Viewer Node"):
+            continue
+        if img.colorspace_settings.name == name:
+            continue
+        try:
+            img.colorspace_settings.name = name
+        except TypeError as e:
+            raise ValueError(f"{name!r} is not a valid colorspace in this Blender: {e}") from e
+        changed.append(img.name)
+    return changed
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -251,6 +292,13 @@ def run(args):
     resized = _resize_textures(texture_max) if texture_max else []
     purged = _purge_unused() if args.get("purge_unused") else 0
 
+    colorspace_fixed = 0
+    if args.get("fix_colorspace"):
+        colorspace_fixed = _fix_colorspace(list(bpy.data.materials))
+    texture_colorspace_changed = []
+    if args.get("texture_colorspace"):
+        texture_colorspace_changed = _set_all_colorspace(args["texture_colorspace"])
+
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
@@ -271,6 +319,8 @@ def run(args):
         "points_thinned": points_thinned_total,
         "textures_resized": resized,
         "orphan_data_purged": purged,
+        "colorspace_fixed": colorspace_fixed,
+        "texture_colorspace_changed": texture_colorspace_changed,
         "output_path": args["output"],
         "warnings": warnings,
     }

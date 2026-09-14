@@ -48,6 +48,8 @@ def main() -> int:
     ap.add_argument("--point-thin-voxel", type=float, metavar="SIZE", help="thin a point cloud (a vertices-only mesh, e.g. from PLY scan data) by voxel-grid downsampling: keep one point per SIZE-sized grid cell. No-op on any mesh that has faces -- use --decimate-ratio for those.")
     ap.add_argument("--webp", action="store_true", help="convert every texture to WebP on export (glb/gltf output only; adds the EXT_texture_webp extension). Not always smaller -- WebP at default quality can exceed a well-compressed PNG for some textures; the reported before/after byte counts are measured, never assumed.")
     ap.add_argument("--webp-quality", type=int, metavar="0-100", help="WebP encode quality (default 75, Blender's own default); only used with --webp")
+    ap.add_argument("--fix-colorspace", action="store_true", help="correct every texture colorspace mismatch info.py flags (Base Color/Emission not 'sRGB'; Metallic/Roughness/Alpha/a normal map's texture not 'Non-Color') based on which material socket it feeds")
+    ap.add_argument("--texture-colorspace", metavar="NAME", help="force every texture's colorspace tag to NAME regardless of role (e.g. 'ACEScg', 'ACES2065-1', 'sRGB', 'Non-Color') -- a blunt override, not per-socket correction; see --fix-colorspace for that. Rejected together with --fix-colorspace.")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -59,6 +61,8 @@ def main() -> int:
 
     if args.draco and args.meshopt:
         ap.error("--draco and --meshopt are alternative geometry compressors -- give at most one")
+    if args.fix_colorspace and args.texture_colorspace:
+        ap.error("--fix-colorspace (per-socket correction) and --texture-colorspace (force everything to one value) are alternatives -- give at most one")
 
     try:
         in_path = _common.require_exists(args.input, "input")
@@ -80,6 +84,7 @@ def main() -> int:
             "target": args.target, "fix_scale": args.fix_scale, "origin": args.origin,
             "point_thin_voxel": args.point_thin_voxel,
             "webp": args.webp, "webp_quality": args.webp_quality,
+            "fix_colorspace": args.fix_colorspace, "texture_colorspace": args.texture_colorspace,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -151,6 +156,10 @@ def main() -> int:
                 print(f"  webp: texture bytes after = {after}")
         if data["orphan_data_purged"]:
             print(f"  purged {data['orphan_data_purged']} orphan data block(s)")
+        if data["colorspace_fixed"]:
+            print(f"  fixed colorspace on {data['colorspace_fixed']} texture reference(s)")
+        if data["texture_colorspace_changed"]:
+            print(f"  set colorspace to {args.texture_colorspace!r} on: {', '.join(data['texture_colorspace_changed'])}")
         for d in data["delegated"]:
             print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
         for w in data.get("warnings", []):

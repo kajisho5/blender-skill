@@ -517,3 +517,21 @@ It only becomes visible if one side of a conversion requests an explicit, non-de
 still uses the default -- discovered exactly that way while verifying RM-029's `--up-axis`
 against a fresh OBJ fixture, before switching to a `.blend` source (which has no import-axis
 step to introduce this kind of ambiguity) to get a clean, unconfounded result.
+
+## Stock Blender has no ACES view transform, only ACES texture colorspaces
+
+RM-030's `optimize.py --texture-colorspace`/`--fix-colorspace` was scoped down after checking
+what "ACES" actually means in real Blender 4.2.23: its `scene.view_settings.view_transform` --
+the tone-mapping/display transform applied when *rendering* -- only accepts `Standard`, `Khronos
+PBR Neutral`, `AgX`, `Filmic`, `Filmic Log`, `False Color`, `Raw` (confirmed by trying to assign
+`'ACES'` and reading Blender's own error, which lists every real option). There is no ACES view
+transform at all in Blender's bundled/default OCIO config -- a full ACES *rendering* pipeline
+needs a separate, non-bundled OCIO config this skill's no-extra-install constraint rules out.
+
+Texture colorspace *tagging* is a different, separate thing (what raw pixel data in an Image
+datablock means, for correct interpretation during shading -- not a render output transform),
+and Blender's bundled config genuinely does include real ACES color spaces there: `image.
+colorspace_settings.name` accepts `ACES2065-1` and `ACEScg` alongside `sRGB`/`Non-Color`/etc.
+(confirmed via the property's own real enum). So `--texture-colorspace ACEScg` is a real, working
+command -- it just tags textures for an ACES-aware shading setup, not a claim that this skill can
+render through a full ACES view transform, which it honestly can't without an extra install.

@@ -570,6 +570,49 @@ class TestToolchain(unittest.TestCase):
         proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--webp", "--json")
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_info_detects_misconfigured_colorspace(self):
+        # misconfigured_colorspace.blend: Base Color tagged Non-Color (should be sRGB);
+        # Roughness and a normal map's own texture both tagged sRGB (should be Non-Color).
+        proc = run("info.py", str(ROOT / "tests" / "fixtures" / "misconfigured_colorspace.blend"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        issues = {i["socket"]: i for i in data["materials"]["colorspace_issues"]}
+        self.assertEqual(set(issues), {"Base Color", "Roughness", "Normal"})
+        self.assertEqual(issues["Base Color"]["expected"], "sRGB")
+        self.assertEqual(issues["Base Color"]["colorspace"], "Non-Color")
+        self.assertEqual(issues["Roughness"]["expected"], "Non-Color")
+        self.assertEqual(issues["Normal"]["image"], "normal_tex")
+
+    def test_optimize_fix_colorspace_corrects_every_mismatch(self):
+        out = self.out / "colorspace_fixed.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "misconfigured_colorspace.blend"), "-o", str(out), "--fix-colorspace", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["colorspace_fixed"], 3)
+
+        verify = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(verify["materials"]["colorspace_issues"], [])
+
+    def test_optimize_texture_colorspace_forces_every_image(self):
+        # ACEScg is a real colorspace in Blender's own bundled OCIO config (confirmed via its
+        # own enum) -- note this tags textures for an ACES-aware shading pipeline; Blender's
+        # stock config has no ACES *view transform* for rendering at all, a separate thing.
+        out = self.out / "aces.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "misconfigured_colorspace.blend"), "-o", str(out), "--texture-colorspace", "ACEScg", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(set(data["texture_colorspace_changed"]), {"diffuse_tex", "rough_tex", "normal_tex"})
+
+    def test_optimize_texture_colorspace_rejects_unknown_name(self):
+        out = self.out / "bad.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "misconfigured_colorspace.blend"), "-o", str(out), "--texture-colorspace", "NotARealColorspace", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_optimize_rejects_fix_colorspace_with_texture_colorspace_together(self):
+        out = self.out / "conflict.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "misconfigured_colorspace.blend"), "-o", str(out), "--fix-colorspace", "--texture-colorspace", "sRGB")
+        self.assertNotEqual(proc.returncode, 0)
+
     def test_split_separates_independent_hierarchies(self):
         # two_props.glb: PropA and PropB, two plain cubes with no parent relationship at all --
         # each must become its own group.
