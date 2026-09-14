@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.11.0...blender-skill-v0.12.0) (2026-09-14)
+
+
+### Features
+
+* **info:** list glTF extensions used, read from the raw file (RM-014) ([#119](https://github.com/kajisho5/blender-skill/issues/119)) ([e17af77](https://github.com/kajisho5/blender-skill/commit/e17af77b48705cb01573669f283d7b72941e1947))
+
 ## [0.11.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.10.0...blender-skill-v0.11.0) (2026-09-14)
 
 
