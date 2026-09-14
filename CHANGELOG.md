@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.10.0...blender-skill-v0.11.0) (2026-09-14)
+
+
+### Features
+
+* **info:** misconfigured-transparency detection (RM-013) ([#117](https://github.com/kajisho5/blender-skill/issues/117)) ([89170dc](https://github.com/kajisho5/blender-skill/commit/89170dca1b95fd2af97d4b70f1120baf8ba3c90c))
+
 ## [0.10.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.9.0...blender-skill-v0.10.0) (2026-09-14)
 
 
