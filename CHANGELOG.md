@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.18.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.17.0...blender-skill-v0.18.0) (2026-09-14)
+
+
+### Features
+
+* **convert:** explicit coordinate-system conversion (RM-029) ([#135](https://github.com/kajisho5/blender-skill/issues/135)) ([555c814](https://github.com/kajisho5/blender-skill/commit/555c814658fdad508048b94a3db439b08e70f419))
+* **convert:** extract/combine animation-only files (RM-028) ([#134](https://github.com/kajisho5/blender-skill/issues/134)) ([9713927](https://github.com/kajisho5/blender-skill/commit/97139276190a123388cf6a854a1e02fe9e3c29f4))
+* **convert:** split one glb into per-object files (RM-027) ([#133](https://github.com/kajisho5/blender-skill/issues/133)) ([e5926c0](https://github.com/kajisho5/blender-skill/commit/e5926c073c7c3dd79abdd4d76d9793164125fd97))
+* **optimize:** WebP texture conversion, measured not assumed (RM-024) ([#131](https://github.com/kajisho5/blender-skill/issues/131)) ([0e7a70c](https://github.com/kajisho5/blender-skill/commit/0e7a70c805f5647f83ded83f662b80a6260fa587))
+
 ## [0.17.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.16.0...blender-skill-v0.17.0) (2026-09-14)
 
 
