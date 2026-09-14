@@ -231,6 +231,27 @@ def _uv_checks(bm):
     }
 
 
+def _unweighted_vertex_count(obj):
+    """How many of this mesh's vertices have no (or all-zero) vertex-group weight, on a mesh
+    that has an Armature modifier -- i.e. will not move with any bone, a real skinning defect.
+
+    Gated on having an Armature modifier at all: a mesh with no vertex groups and no armature
+    modifier isn't a skinned mesh in the first place (a static prop, an eye mesh parented
+    directly to a bone by object transform rather than vertex weights) -- reporting every one of
+    its vertices as "unweighted" would be noise, not a defect. Confirmed on fox.glb: the rigged
+    "fox" mesh reads 0/1728 (fully weighted); the unrigged "Icosphere" eye mesh has no armature
+    modifier at all and is correctly skipped (None), not reported as 42/42 unweighted.
+    """
+    if not any(m.type == "ARMATURE" for m in obj.modifiers):
+        return None
+    count = 0
+    for v in obj.data.vertices:
+        total = sum(g.weight for g in v.groups)
+        if total <= 1e-6:
+            count += 1
+    return count
+
+
 def _mesh_stats(obj):
     """Triangle/vertex counts and UV layer count as-imported (never modifies the mesh -- info.py
     only reads), plus two checks computed on a *welded* scratch copy:
@@ -273,6 +294,7 @@ def _mesh_stats(obj):
     empty_slots = sum(1 for slot in obj.material_slots if slot.material is None)
     origin_to_center, origin_to_bottom_center = _local_bbox_reference_points(obj)
     vertex_colors, custom_attributes = _attribute_lists(obj)
+    unweighted_vertices = _unweighted_vertex_count(obj)
     return {
         "triangles": triangles,
         "vertices": vertex_count,
@@ -290,6 +312,7 @@ def _mesh_stats(obj):
         "origin_offset_from_bottom_center": list(origin_to_bottom_center),
         "vertex_colors": vertex_colors,
         "custom_attributes": custom_attributes,
+        "unweighted_vertices": unweighted_vertices,
     }
 
 
@@ -369,11 +392,22 @@ def _animations(scene):
     return out
 
 
+def _bone_hierarchy(armature_data):
+    # parent name (or None for a root) per bone, not a nested tree -- flat is easier for an
+    # agent to query ("what's b_Hip_01's parent?") and just as complete; depth/children are
+    # trivially derived from this by whoever needs them.
+    return [{"name": b.name, "parent": b.parent.name if b.parent else None} for b in armature_data.bones]
+
+
 def _armatures():
     out = []
     for obj in bpy.data.objects:
         if obj.type == "ARMATURE":
-            out.append({"name": obj.name, "bone_count": len(obj.data.bones)})
+            out.append({
+                "name": obj.name,
+                "bone_count": len(obj.data.bones),
+                "bones": _bone_hierarchy(obj.data),
+            })
     return out
 
 
@@ -443,6 +477,12 @@ def run(args):
             warnings.append(
                 f"{stats['name']}: unapplied scale {tuple(round(s, 4) for s in stats['scale'])} "
                 "(a common sign of a cm/m unit mismatch) -- try: optimize.py <file> -o <out> --fix-scale"
+            )
+        if stats["unweighted_vertices"]:
+            warnings.append(
+                f"{stats['name']}: {stats['unweighted_vertices']} vertex/vertices with no bone "
+                "weight (won't move with the armature) -- needs manual weight painting, no "
+                "automatic fix"
             )
         if stats["uv_checks"]:
             uv = stats["uv_checks"]
