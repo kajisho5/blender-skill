@@ -15,6 +15,38 @@ Any of the three installs `SKILL.md` and `scripts/` where your agent looks for s
 (`--blender` flag, `$BLENDER`, `PATH`, or the OS's usual install location) and tell you how to
 install it if they can't.
 
+## Demo
+
+Real output from `examples/make_demo.sh` against `tests/fixtures/fox.glb` -- nothing staged.
+
+<p align="center">
+  <img src="docs/demo/thumbnail.png" alt="render.py thumbnail" width="45%">
+  <img src="docs/demo/sheet.png" alt="render.py --sheet, a 4-view contact sheet" width="45%">
+</p>
+
+A 360° turntable (`render.py --turntable -o turntable.mp4`) is at
+[`docs/demo/turntable.mp4`](docs/demo/turntable.mp4). The same run's `info.py`/`check.py` output,
+unedited:
+
+```
+$ python3 scripts/info.py tests/fixtures/fox.glb
+tests/fixtures/fox.glb: 3 object(s), 2 mesh(es), 656 triangles, 1770 vertices
+  materials: 1  textures: 1  animations: 3
+  warning: fox: 1150 non-manifold edge(s) (hole/gap in the surface, after welding split normals/UV seams) -- try: optimize.py <file> -o <out> --fill-holes
+  warning: fox: flipped-normal check skipped (unreliable while non-manifold edges are present -- fix those first, then re-run info.py)
+
+$ python3 scripts/check.py tests/fixtures/fox.glb --target three.js
+tests/fixtures/fox.glb vs three.js: PASS
+  PASS format: gltf is a recommended format for three.js
+  PASS triangle budget: 656 <= 300000
+  PASS texture size: all textures <= 4096px
+  PASS textures present: no missing texture files
+  PASS transmission size: 0.2 MB <= 15 MB
+```
+
+Run `bash examples/make_demo.sh` yourself to regenerate all of it (info, optimize, convert
+`--verify`, render, look, bake, check) end to end -- needs Blender, see Requirements below.
+
 ## What this is / isn't
 
 Inspects, converts, optimizes, renders, bakes and validates 3D assets from natural-language
