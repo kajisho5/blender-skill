@@ -107,7 +107,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   before/after comparison, or the UV layout (as SVG -- headless Blender's PNG UV export needs a
   GPU offscreen context `-b` mode doesn't have).
 - **`check.py`** -- PASS/WARN/FAIL against a delivery target's budget (three.js, Unity, Unreal,
-  Godot, iOS/Android AR, WebXR, 3D printing, Sketchfab), every row naming its fix command.
+  Godot, iOS/Android AR, WebXR, 3D printing, Sketchfab), every row naming its fix command; for
+  `.usdz` inputs, also validates the package itself against Apple's real USDZ requirements (every
+  entry uncompressed and 64-byte-aligned -- read from the file's own zip structure, independent
+  of Blender).
 - **`bake.py`** -- Cycles-bake a material to a texture (AO/normal/roughness/diffuse/combined);
   `--atlas` repacks UVs across several objects into one shared image first.
 - **`scene.py`** -- assemble a declarative `scene.json` (asset placement, lights, camera,

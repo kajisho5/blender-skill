@@ -348,6 +348,22 @@ Verified against a real Draco-compressed export (`optimize.py --draco` on `box.g
 `extensionsUsed == extensionsRequired == ['KHR_draco_mesh_compression']`) and against fox.glb/
 box.glb (both `[]`, no false positives).
 
+## A USDZ's own zip container has real, enforced structural rules -- and Blender enforces them too
+
+Apple's USDZ spec requires every entry in the package to be stored uncompressed (never Deflate)
+and to start at a 64-byte-aligned file offset (so a viewer can mmap the archive directly).
+Confirmed this isn't just an Apple-only nicety: Blender's own USD importer refuses to even open a
+usdz re-zipped with ordinary Deflate compression ("Error: Could not open USD archive for
+reading"), on a file whose USD content is otherwise byte-identical. Confirmed the *positive*
+side too: real `convert.py` USDZ output (both a plain cube and a textured, multi-entry export of
+fox.glb) is already fully compliant -- every entry stored, every entry's data starting at a
+64-byte-aligned offset -- Blender's own exporter gets this right without any extra work from
+this skill. `check.py`'s new USDZ-package row (RM-016) reads this directly from the file's own
+zip structure (`zipfile`/`struct`, stdlib only, no Blender) rather than assuming compliance;
+because a broken package fails to even *import* into Blender, the negative case can only be
+exercised by testing `scripts/_usdz_validate.py` directly, not through `check.py`'s CLI
+end-to-end (info.py, which check.py always runs first, fails before this row would run).
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

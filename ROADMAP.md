@@ -26,7 +26,7 @@ what v0.1.0 actually does.
 | RM-013 | inspect | 透明マテリアルの誤設定検出（alpha blend vs clip） | done | #13 |
 | RM-014 | inspect | glTF拡張の使用一覧（KHR_*）と対応表 | done | #14 |
 | RM-015 | inspect | 重複メッシュ/インスタンス化可能なオブジェクト検出 | done | #15 |
-| RM-016 | convert | USD/USDZ 出力の iOS Quick Look 互換性検証 | planned | #16 |
+| RM-016 | convert | USD/USDZ 出力の iOS Quick Look 互換性検証 | done | #16 |
 | RM-017 | convert | FBX→glTF のアニメ保持の再import検証を標準化 | done | |
 | RM-018 | convert | OBJ/MTL→PBR 変換のヒューリスティック | planned | #17 |
 | RM-019 | convert | STL 出力の3Dプリント向け（単位・マニフォールド・壁厚） | planned | #18 |

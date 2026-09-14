@@ -32,6 +32,10 @@ DRACO_FIXTURE = ROOT / "tests" / "fixtures" / "box_draco.glb"
 DUPLICATE_MESH_FIXTURE = ROOT / "tests" / "fixtures" / "duplicate_mesh_scene.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
+import _usdz_validate  # noqa: E402
+
+USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box.usdz"
+BROKEN_USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box_broken.usdz"
 
 
 def _blender_available() -> bool:
@@ -46,6 +50,35 @@ def run(*argv, cwd=None):
     proc = subprocess.run([sys.executable, str(ROOT / "scripts" / argv[0])] + list(argv[1:]),
                            capture_output=True, text=True, cwd=cwd)
     return proc
+
+
+class TestUsdzValidate(unittest.TestCase):
+    """No Blender needed -- _usdz_validate reads a .usdz's own zip structure directly. The
+    negative case can't be driven through check.py's CLI end-to-end: Blender's own USD importer
+    refuses to even open a re-compressed usdz (confirmed: "Could not open USD archive for
+    reading"), so info.py -- which check.py always runs first -- fails before this module's
+    check would ever run. Testing the module directly is the only way to exercise that path.
+    """
+
+    def test_valid_usdz_passes(self):
+        # box.usdz: a real convert.py output (Blender's own USD exporter) -- uncompressed,
+        # 64-byte-aligned, as Apple's USDZ spec requires.
+        result = _usdz_validate.validate(str(USDZ_FIXTURE))
+        self.assertIsNotNone(result)
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["issues"], [])
+        self.assertTrue(result["entries"][0]["stored"])
+        self.assertTrue(result["entries"][0]["aligned"])
+
+    def test_recompressed_usdz_fails(self):
+        # box_broken.usdz: the same content, re-zipped with Deflate compression -- violates both
+        # rules at once (not stored, and no longer 64-byte-aligned since Deflate changes the
+        # entry's size).
+        result = _usdz_validate.validate(str(BROKEN_USDZ_FIXTURE))
+        self.assertIsNotNone(result)
+        self.assertFalse(result["valid"])
+        self.assertFalse(result["entries"][0]["stored"])
+        self.assertFalse(result["entries"][0]["aligned"])
 
 
 @unittest.skipUnless(_blender_available(), "no Blender found (see scripts/_run.py's search order)")
@@ -370,6 +403,18 @@ class TestToolchain(unittest.TestCase):
             instancing = json.loads(proc.stdout)["instancing"]
             self.assertEqual(instancing["already_instanced"], [])
             self.assertEqual(instancing["duplicate_mesh_candidates"], [])
+
+    def test_check_ios_ar_target_validates_usdz_package_structure(self):
+        # A real convert.py --draco... no, a plain usdz export -- confirms check.py's ios-ar
+        # target actually runs the USDZ-package-structure row (RM-016) on a real Blender-produced
+        # file, not just that the standalone validator works in isolation.
+        usdz = self.out / "box.usdz"
+        proc = run("convert.py", str(FIXTURE), "-o", str(usdz))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        proc = run("check.py", str(usdz), "--target", "ios-ar", "--json")
+        self.assertEqual(proc.returncode, 1, proc.stderr)  # UV-map FAIL on box.glb's unwrapped cube, unrelated to this row
+        rows = {r["check"]: r for r in json.loads(proc.stdout)["checks"]}
+        self.assertEqual(rows["USDZ package"]["status"], "PASS")
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

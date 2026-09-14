@@ -20,6 +20,7 @@ import _common
 import _delegate
 import _formats
 import _run
+import _usdz_validate
 from _common import SkillError
 
 TARGETS = ["three.js", "unity", "unreal", "godot", "ios-ar", "android-ar", "webxr", "3d-print", "sketchfab"]
@@ -107,6 +108,17 @@ def _check(info: dict, target: str) -> list:
                          "fix": "manifold repair is not automated by this skill yet; use Blender's 3D-Print toolbox or a dedicated repair tool"})
         else:
             rows.append({"check": "manifold", "status": "PASS", "detail": "no non-manifold edges"})
+
+    if fmt == "usdz":
+        usdz = _usdz_validate.validate(info["file"])
+        if usdz is None:
+            rows.append({"check": "USDZ package", "status": "FAIL", "detail": "not a valid zip container"})
+        elif usdz["valid"]:
+            rows.append({"check": "USDZ package", "status": "PASS",
+                         "detail": f"{len(usdz['entries'])} entry/entries, all uncompressed and 64-byte-aligned (Apple's USDZ package requirements)"})
+        else:
+            rows.append({"check": "USDZ package", "status": "FAIL", "detail": "; ".join(usdz["issues"]),
+                         "fix": f"python3 scripts/convert.py {info['file']} -o out.usdz  # re-export via this skill's own exporter"})
 
     return rows
 
