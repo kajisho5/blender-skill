@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.9.0...blender-skill-v0.10.0) (2026-09-14)
+
+
+### Features
+
+* **info:** draw-call estimate from per-object material usage (RM-012) ([#115](https://github.com/kajisho5/blender-skill/issues/115)) ([19d3951](https://github.com/kajisho5/blender-skill/commit/19d3951c6dc2c0c4d904f58c6a3d7a9924d6b9ea))
+
 ## [0.9.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.8.0...blender-skill-v0.9.0) (2026-09-14)
 
 

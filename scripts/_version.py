@@ -2,4 +2,4 @@
 .claude-plugin/plugin.json and SKILL.md's frontmatter by release-please's `extra-files`
 (release-please-config.json) -- never edit this by hand outside a release-please PR.
 """
-__version__ = "0.9.0"  # x-release-please-version
+__version__ = "0.10.0"  # x-release-please-version
