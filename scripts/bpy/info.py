@@ -13,6 +13,7 @@ import _compat
 
 import bmesh
 import bpy
+import mathutils
 from mathutils.bvhtree import BVHTree
 
 
@@ -79,6 +80,19 @@ def _flipped_normal_faces(bm) -> int:
     return flipped
 
 
+def _local_bbox_reference_points(obj):
+    """Local-space bounding-box center and bottom-center, in the object's own coordinate frame --
+    i.e. how far the object's origin sits from each, which is what `optimize.py --origin
+    center|bottom` moves it to. Not itself a defect: many assets deliberately place their origin
+    away from either (a door's origin at its hinge edge, a wheel's at its axle) -- info.py reports
+    this as data, never a warning, unlike non-manifold/self-intersection/flipped-normal.
+    """
+    corners = [mathutils.Vector(c) for c in obj.bound_box]
+    center = sum(corners, mathutils.Vector()) / 8
+    bottom_center = mathutils.Vector((center.x, center.y, min(c.z for c in corners)))
+    return center, bottom_center
+
+
 def _mesh_stats(obj):
     """Triangle/vertex counts and UV layer count as-imported (never modifies the mesh -- info.py
     only reads), plus two checks computed on a *welded* scratch copy:
@@ -118,6 +132,7 @@ def _mesh_stats(obj):
     bm.free()
     uv_layers = len(obj.data.uv_layers)
     empty_slots = sum(1 for slot in obj.material_slots if slot.material is None)
+    origin_to_center, origin_to_bottom_center = _local_bbox_reference_points(obj)
     return {
         "triangles": triangles,
         "vertices": vertex_count,
@@ -129,6 +144,9 @@ def _mesh_stats(obj):
         "uv_maps": uv_layers,
         "has_uv": uv_layers > 0,
         "empty_material_slots": empty_slots,
+        "scale": list(obj.scale),
+        "origin_offset_from_center": list(origin_to_center),
+        "origin_offset_from_bottom_center": list(origin_to_bottom_center),
     }
 
 
@@ -245,6 +263,11 @@ def run(args):
             warnings.append(f"{stats['name']}: no UV map")
         if stats["empty_material_slots"]:
             warnings.append(f"{stats['name']}: {stats['empty_material_slots']} empty material slot(s)")
+        if any(abs(s - 1.0) > 1e-4 for s in stats["scale"]):
+            warnings.append(
+                f"{stats['name']}: unapplied scale {tuple(round(s, 4) for s in stats['scale'])} "
+                "(a common sign of a cm/m unit mismatch) -- try: optimize.py <file> -o <out> --fix-scale"
+            )
 
     return {
         "file": path,
