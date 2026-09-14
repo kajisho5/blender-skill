@@ -252,6 +252,19 @@ def _unweighted_vertex_count(obj):
     return count
 
 
+def _draw_call_estimate(obj) -> int:
+    """One draw call per distinct material actually used by a face on this object -- refines the
+    naive "material count x object count" idea (which wildly overestimates when objects share
+    materials) into the real batching unit most real-time engines use: consecutive triangles
+    share a draw call only while they're the same (object, material) pair. A mesh with no
+    material slots at all (confirmed on fox.glb's "Icosphere" eye mesh) still reads every face's
+    material_index as 0 -- still a single real draw call for the engine's default material, not
+    zero. Does not model engine-specific batching/GPU instancing of identical meshes -- a
+    starting-point estimate, not a guaranteed number.
+    """
+    return len({p.material_index for p in obj.data.polygons})
+
+
 def _mesh_stats(obj):
     """Triangle/vertex counts and UV layer count as-imported (never modifies the mesh -- info.py
     only reads), plus two checks computed on a *welded* scratch copy:
@@ -295,6 +308,7 @@ def _mesh_stats(obj):
     origin_to_center, origin_to_bottom_center = _local_bbox_reference_points(obj)
     vertex_colors, custom_attributes = _attribute_lists(obj)
     unweighted_vertices = _unweighted_vertex_count(obj)
+    draw_calls_estimate = _draw_call_estimate(obj)
     return {
         "triangles": triangles,
         "vertices": vertex_count,
@@ -313,6 +327,7 @@ def _mesh_stats(obj):
         "vertex_colors": vertex_colors,
         "custom_attributes": custom_attributes,
         "unweighted_vertices": unweighted_vertices,
+        "draw_calls_estimate": draw_calls_estimate,
     }
 
 
@@ -540,6 +555,7 @@ def run(args):
             "vertices": total_verts,
             "per_object": per_object,
             "lod_suggestions": _lod_suggestions(total_tris),
+            "draw_calls_estimate": sum(stats["draw_calls_estimate"] for stats in per_object),
         },
         "materials": {"count": len(materials), "names": [m.name for m in materials]},
         "textures": _texture_info(),

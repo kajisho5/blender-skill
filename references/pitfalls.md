@@ -296,6 +296,15 @@ its decimation. Root cause not yet isolated -- tracked as
 suggestions (RM-010), which only compute ratios from the current triangle count and never call
 `optimize.py` or trust its output.
 
+## `polygon.material_index` reads 0 even on a mesh with zero material slots
+
+Confirmed on fox.glb's "Icosphere" eye mesh (0 material slots): every one of its faces still
+reads `material_index == 0`, the same index a *real* first material slot would use. Naively
+treating "no material slots" as "not rendered" would be wrong -- Blender (and every real-time
+engine) still draws it, just with a default/fallback material, so it's still one real draw call.
+`_draw_call_estimate` relies on this: `len({p.material_index for p in obj.data.polygons})` reads
+1 for this mesh, correctly, with no special-casing needed for the zero-material-slots case.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

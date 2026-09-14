@@ -26,6 +26,7 @@ OVERLAPPING_UV_FIXTURE = ROOT / "tests" / "fixtures" / "overlapping_uv_cubes.glb
 VERTEX_COLORS_FIXTURE = ROOT / "tests" / "fixtures" / "vertex_colors_cube.blend"
 ROOT_MOTION_FIXTURE = ROOT / "tests" / "fixtures" / "root_motion_rig.blend"
 UNWEIGHTED_VERTEX_FIXTURE = ROOT / "tests" / "fixtures" / "unweighted_vertex_cube.blend"
+MULTI_MATERIAL_FIXTURE = ROOT / "tests" / "fixtures" / "multi_material_cube.glb"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -274,6 +275,29 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(data["meshes"]["triangles"], 12)
         suggestions = {s["level"]: s["target_triangles"] for s in data["meshes"]["lod_suggestions"]}
         self.assertEqual(suggestions, {"LOD1": 6, "LOD2": 3, "LOD3": 1})
+
+    def test_info_estimates_one_draw_call_per_object_with_a_single_material(self):
+        # fox.glb: 2 mesh objects, each using exactly one material's worth of faces (the
+        # "Icosphere" eye mesh has no material slots at all but every face still reads
+        # material_index 0 -- still one real draw call, not zero).
+        proc = run("info.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        for stats in data["meshes"]["per_object"]:
+            self.assertEqual(stats["draw_calls_estimate"], 1)
+        self.assertEqual(data["meshes"]["draw_calls_estimate"], 2)
+
+    def test_info_estimates_multiple_draw_calls_for_one_object_with_multiple_materials(self):
+        # multi_material_cube.glb: a single cube object with 2 materials assigned to alternating
+        # faces -- the real per-object batching unit is 2 draw calls, not 1 (naive "one draw call
+        # per object") and not "materials x objects" (2 materials x 1 object would coincidentally
+        # also read 2 here, but that formula breaks as soon as objects share materials -- this
+        # checks the actual per-object material-usage count, not that coincidental product).
+        proc = run("info.py", str(MULTI_MATERIAL_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["meshes"]["per_object"][0]["draw_calls_estimate"], 2)
+        self.assertEqual(data["meshes"]["draw_calls_estimate"], 2)
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
