@@ -93,6 +93,110 @@ def _local_bbox_reference_points(obj):
     return center, bottom_center
 
 
+def _seg_intersect(p1, p2, p3, p4) -> bool:
+    def ccw(a, b, c):
+        return (c[1] - a[1]) * (b[0] - a[0]) - (b[1] - a[1]) * (c[0] - a[0])
+    d1, d2 = ccw(p3, p4, p1), ccw(p3, p4, p2)
+    d3, d4 = ccw(p1, p2, p3), ccw(p1, p2, p4)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+def _point_in_tri(p, tri) -> bool:
+    def sign(a, b, c):
+        return (a[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (a[1] - c[1])
+    d1, d2, d3 = sign(p, tri[0], tri[1]), sign(p, tri[1], tri[2]), sign(p, tri[2], tri[0])
+    has_neg, has_pos = (d1 < 0 or d2 < 0 or d3 < 0), (d1 > 0 or d2 > 0 or d3 > 0)
+    return not (has_neg and has_pos)
+
+
+def _tri_overlap_2d(t1, t2) -> bool:
+    for i in range(3):
+        for j in range(3):
+            if _seg_intersect(t1[i], t1[(i + 1) % 3], t2[j], t2[(j + 1) % 3]):
+                return True
+    return _point_in_tri(t1[0], t2) or _point_in_tri(t2[0], t1)
+
+
+def _uv_checks(bm):
+    """UV out-of-[0,1]-range, zero-area (never meaningfully unwrapped), and overlapping faces,
+    on the *active* UV layer of an already-triangulated bmesh. Returns None if there's no UV
+    layer (nothing to check).
+
+    - out_of_bounds is informational, not a defect: a texture using UV wrap/repeat tiling
+      legitimately places UVs outside [0,1] (confirmed: scaling a normal unwrap by 3x for tiling
+      reads 10/12 faces out of bounds, with 0 zero-area and 0 overlap -- a real, common,
+      non-broken pattern).
+    - zero_area faces are a real defect: their UV triangle has ~zero area, meaning the face was
+      never meaningfully unwrapped (confirmed: collapsing every UV to a single point reads
+      12/12 faces zero-area, 0 out-of-bounds).
+    - overlapping is approximate and informational, like self_intersecting_faces_approx --
+      overlapping UV islands are a deliberate, common technique (mirrored left/right halves of a
+      symmetric character sharing one UV island) as often as they're a mistake, so this is
+      reported as data, never a warning with a fix command.
+
+    Two things had to be gotten right to avoid this being noisy garbage on a real asset:
+    1. Filtering candidate pairs by UV-space bounding-box overlap alone (matching the 3D
+       self-intersection check's approach) is nowhere near precise enough here: a real,
+       efficiently-packed UV layout has many faces whose *bounding boxes* touch or overlap
+       without the *triangles* actually overlapping (confirmed: naive bbox-only counting reported
+       273/576 false "overlaps" on tests/fixtures/fox.glb, a cleanly laid-out real character UV
+       map, and 33/80 on its eye mesh). Exact 2D triangle-triangle overlap (edge-crossing plus
+       point-in-triangle containment) on the bbox-filtered candidates brings both to the correct
+       0/0.
+    2. Excluding "adjacent" pairs by shared UV vertex position must only exclude a shared *edge*
+       (1-2 shared vertices) -- excluding on *any* shared vertex incorrectly waves through a fully
+       duplicated/stacked island (all 3 vertices coincide) as "just adjacent", missing the most
+       severe overlap case entirely (confirmed: a synthetic mirrored/stacked-UV cube read 0
+       overlapping faces with that bug, 12 (the true count) once fixed to only exclude 1-2 shared
+       vertices, never 3).
+    Degenerate (zero-area) faces are excluded from the overlap scan entirely -- a point has no
+    meaningful "overlap" and would otherwise register against everything near it, double-counting
+    the same defect zero_area already reports.
+    """
+    uv_layer = bm.loops.layers.uv.active
+    if uv_layer is None:
+        return None
+    out_of_bounds = 0
+    zero_area = 0
+    candidates = []
+    for f in bm.faces:
+        uvs = [(loop[uv_layer].uv.x, loop[uv_layer].uv.y) for loop in f.loops]
+        if any(u < 0 or u > 1 for uv in uvs for u in uv):
+            out_of_bounds += 1
+        a, b, c = uvs
+        area = abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2
+        degenerate = area < 1e-8
+        if degenerate:
+            zero_area += 1
+        xs, ys = [u[0] for u in uvs], [u[1] for u in uvs]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+        positions = {(round(x, 5), round(y, 5)) for x, y in uvs}
+        candidates.append((bbox, positions, uvs, degenerate))
+
+    overlapping = 0
+    n = len(candidates)
+    for i in range(n):
+        bi, pi, ti, di = candidates[i]
+        if di:
+            continue
+        for j in range(i + 1, n):
+            bj, pj, tj, dj = candidates[j]
+            if dj:
+                continue
+            if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
+                continue
+            if 0 < len(pi & pj) < 3:
+                continue
+            if _tri_overlap_2d(ti, tj):
+                overlapping += 1
+
+    return {
+        "out_of_bounds_faces": out_of_bounds,
+        "zero_area_faces": zero_area,
+        "overlapping_faces_approx": overlapping,
+    }
+
+
 def _mesh_stats(obj):
     """Triangle/vertex counts and UV layer count as-imported (never modifies the mesh -- info.py
     only reads), plus two checks computed on a *welded* scratch copy:
@@ -128,6 +232,7 @@ def _mesh_stats(obj):
     # Only trust the flipped-normal comparison on an already-manifold mesh -- see
     # _flipped_normal_faces' docstring for the real (not hypothetical) corruption this avoids.
     flipped_normals = _flipped_normal_faces(bm) if non_manifold == 0 else None
+    uv_checks = _uv_checks(bm)
     bm_welded.free()
     bm.free()
     uv_layers = len(obj.data.uv_layers)
@@ -141,6 +246,7 @@ def _mesh_stats(obj):
         "self_intersecting_faces_approx": self_intersecting,
         "flipped_normal_faces": flipped_normals,
         "duplicate_vertices": duplicate_vertices,
+        "uv_checks": uv_checks,
         "uv_maps": uv_layers,
         "has_uv": uv_layers > 0,
         "empty_material_slots": empty_slots,
@@ -268,6 +374,18 @@ def run(args):
                 f"{stats['name']}: unapplied scale {tuple(round(s, 4) for s in stats['scale'])} "
                 "(a common sign of a cm/m unit mismatch) -- try: optimize.py <file> -o <out> --fix-scale"
             )
+        if stats["uv_checks"]:
+            uv = stats["uv_checks"]
+            if uv["zero_area_faces"]:
+                warnings.append(
+                    f"{stats['name']}: {uv['zero_area_faces']} face(s) with zero-area UVs "
+                    "(never meaningfully unwrapped) -- no automatic fix, needs a real UV unwrap"
+                )
+            if uv["overlapping_faces_approx"]:
+                warnings.append(
+                    f"{stats['name']}: ~{uv['overlapping_faces_approx']} face pair(s) have overlapping UVs "
+                    "(approximate -- may be deliberate, e.g. mirrored islands; worth a manual look, no automatic fix)"
+                )
 
     return {
         "file": path,

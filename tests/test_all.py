@@ -21,6 +21,8 @@ BROKEN_FIXTURE = ROOT / "tests" / "fixtures" / "broken_cube.glb"
 FLIPPED_FIXTURE = ROOT / "tests" / "fixtures" / "flipped_cube.glb"
 SCALED_FIXTURE = ROOT / "tests" / "fixtures" / "scaled_cube.glb"
 OFFSET_ORIGIN_FIXTURE = ROOT / "tests" / "fixtures" / "offset_origin_cube.glb"
+ZERO_AREA_UV_FIXTURE = ROOT / "tests" / "fixtures" / "zero_area_uv_cube.glb"
+OVERLAPPING_UV_FIXTURE = ROOT / "tests" / "fixtures" / "overlapping_uv_cubes.glb"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -147,6 +149,38 @@ class TestToolchain(unittest.TestCase):
         after_bottom = json.loads(run("info.py", str(out_bottom), "--json").stdout)
         self.assertEqual(after_bottom["meshes"]["per_object"][0]["origin_offset_from_bottom_center"], [0.0, 0.0, 0.0])
         self.assertEqual(after_bottom["bounding_box"], world_bbox_before)
+
+    def test_info_detects_zero_area_uv_and_no_false_positive_overlap(self):
+        # zero_area_uv_cube.glb: every face's UV collapsed to a single point -- never
+        # meaningfully unwrapped. Confirmed not to also spuriously register as UV overlap
+        # (degenerate faces are excluded from the overlap scan, not double-counted).
+        proc = run("info.py", str(ZERO_AREA_UV_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        uv = data["meshes"]["per_object"][0]["uv_checks"]
+        self.assertEqual(uv["zero_area_faces"], 12)
+        self.assertEqual(uv["overlapping_faces_approx"], 0)
+        self.assertTrue(any("zero-area UVs" in w for w in data["warnings"]))
+
+    def test_info_detects_overlapping_uv_islands(self):
+        # overlapping_uv_cubes.glb: two cubes joined into one mesh, with the second island's UVs
+        # deliberately copied on top of the first's -- a real, if unusual, full overlap.
+        proc = run("info.py", str(OVERLAPPING_UV_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        uv = data["meshes"]["per_object"][0]["uv_checks"]
+        self.assertEqual(uv["overlapping_faces_approx"], 12)
+        self.assertTrue(any("overlapping UVs" in w for w in data["warnings"]))
+
+    def test_info_uv_checks_have_no_false_positives_on_a_real_character_mesh(self):
+        # fox.glb: a real, cleanly-laid-out UV map. A naive bounding-box-only overlap filter
+        # falsely flagged 273/576 faces here during development (see references/pitfalls.md) --
+        # the exact 2D triangle-overlap test must read 0.
+        proc = run("info.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        uv = json.loads(proc.stdout)["meshes"]["per_object"][0]["uv_checks"]
+        self.assertEqual(uv["overlapping_faces_approx"], 0)
+        self.assertEqual(uv["zero_area_faces"], 0)
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

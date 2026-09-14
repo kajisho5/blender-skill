@@ -67,7 +67,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   self-intersection detection, flipped-normal detection (only reported when trustworthy -- see
   below), unapplied-scale detection (a common cm/m unit-mismatch symptom), origin offset from each
   object's own bounding-box center/bottom-center (data, not a defect -- an off-center origin is
-  often deliberate), UV presence, each defect naming its fix command where a safe one exists.
+  often deliberate), UV out-of-[0,1]-range/zero-area/overlap detection (out-of-bounds and overlap
+  are data, not defects -- tiling textures and mirrored UV islands both use them deliberately;
+  zero-area is a real "never actually unwrapped" defect), each defect naming its fix command where
+  a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
