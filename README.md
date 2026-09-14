@@ -92,16 +92,20 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   Blender's own OBJ importer applies -- confirmed to match its real output exactly -- since
   OBJ/MTL predates PBR and has no metallic/roughness channels of its own (metallic is never
   guessed: no reliable signal separates a metal from a shiny dielectric in Phong parameters
-  alone), and ray-cast wall-thickness analysis (a real, testable "3D-Print Toolbox"-style
+  alone), ray-cast wall-thickness analysis (a real, testable "3D-Print Toolbox"-style
   thickness check -- that add-on itself is a Blender Extension as of 4.2+, not bundled, so not
-  something this skill can assume is installed), each defect naming its fix command where a safe
-  one exists.
+  something this skill can assume is installed), and point-cloud detection (a PLY vertices-only
+  mesh -- photogrammetry/LiDAR scan data -- reads `is_point_cloud: true` and skips the usual
+  no-UV-map warning, which is meaningless for one), each defect naming its fix command where a
+  safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
   boundary-edge holes (`--fill-holes`), bake unapplied scale into the mesh (`--fix-scale`),
   recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
-  resolution, purge orphan data;
+  resolution, purge orphan data, thin a point cloud by voxel-grid downsampling
+  (`--point-thin-voxel SIZE` -- a no-op on any mesh that has faces, since that's what
+  `--decimate-ratio` is for);
   `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say

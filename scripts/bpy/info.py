@@ -347,6 +347,11 @@ def _mesh_stats(obj):
     return {
         "triangles": triangles,
         "vertices": vertex_count,
+        # A pure point cloud (PLY's other common use besides a mesh: vertices only, no faces --
+        # e.g. photogrammetry/LiDAR scan data) has 0 triangles but a nonzero vertex count. Every
+        # face-based check below (manifold, self-intersection, wall thickness, ...) is
+        # meaningless on one and reads as a trivial 0/None rather than a real defect.
+        "is_point_cloud": triangles == 0 and vertex_count > 0,
         "non_manifold_edges": non_manifold,
         "boundary_edges": boundary_edges,
         "self_intersecting_faces_approx": self_intersecting,
@@ -690,7 +695,7 @@ def run(args):
             warnings.append(f"{stats['name']}: flipped-normal check skipped (unreliable while non-manifold edges are present -- fix those first, then re-run info.py)")
         if stats["self_intersecting_faces_approx"]:
             warnings.append(f"{stats['name']}: ~{stats['self_intersecting_faces_approx']} face pair(s) look self-intersecting (approximate, bounding-box based -- worth a manual look, no automatic fix)")
-        if not stats["has_uv"]:
+        if not stats["has_uv"] and not stats["is_point_cloud"]:
             warnings.append(f"{stats['name']}: no UV map")
         if stats["empty_material_slots"]:
             warnings.append(f"{stats['name']}: {stats['empty_material_slots']} empty material slot(s)")

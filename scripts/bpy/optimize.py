@@ -169,6 +169,33 @@ def _has_non_manifold(obj) -> bool:
     return non_manifold
 
 
+def _thin_point_cloud(obj, voxel_size: float) -> int:
+    """Voxel-grid downsampling for a point cloud (a PLY vertices-only mesh, no faces): bucket
+    every vertex into a voxel_size-sized grid cell and keep only the first vertex encountered in
+    each occupied cell, deleting the rest. This is the standard point-cloud decimation technique
+    (used by PCL/Open3D/CloudCompare) -- distinct from mesh Decimate, which needs faces/edges a
+    point cloud doesn't have. Returns the number of points removed; a no-op (returns 0) on a mesh
+    that has any faces at all, since this is specifically for point-cloud "thinning", not mesh
+    simplification.
+    """
+    if len(obj.data.polygons) > 0:
+        return 0
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    buckets = {}
+    for v in bm.verts:
+        key = (round(v.co.x / voxel_size), round(v.co.y / voxel_size), round(v.co.z / voxel_size))
+        buckets.setdefault(key, v)  # first vertex seen per cell is the kept representative
+    keep_indices = {v.index for v in buckets.values()}
+    to_remove = [v for v in bm.verts if v.index not in keep_indices]
+    removed = len(to_remove)
+    bmesh.ops.delete(bm, geom=to_remove, context="VERTS")
+    bm.to_mesh(obj.data)
+    bm.free()
+    obj.data.update()
+    return removed
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -194,8 +221,12 @@ def run(args):
     welded_total = 0
     holes_filled_total = 0
     scales_fixed_total = 0
+    points_thinned_total = 0
     warnings = []
     for o in mesh_objs:
+        point_thin_voxel = args.get("point_thin_voxel")
+        if point_thin_voxel and point_thin_voxel > 0:
+            points_thinned_total += _thin_point_cloud(o, point_thin_voxel)
         if args.get("fix_scale") and _fix_scale(o):
             scales_fixed_total += 1
         if args.get("fill_holes"):
@@ -229,6 +260,7 @@ def run(args):
         "vertices_welded": welded_total,
         "holes_filled": holes_filled_total,
         "scales_fixed": scales_fixed_total,
+        "points_thinned": points_thinned_total,
         "textures_resized": resized,
         "orphan_data_purged": purged,
         "output_path": args["output"],
