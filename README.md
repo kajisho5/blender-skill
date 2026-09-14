@@ -99,7 +99,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   no-UV-map warning, which is meaningless for one), each defect naming its fix command where a
   safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
-  `--verify` re-imports the output and diffs it against the input.
+  `--verify` re-imports the output and diffs it against the input; `--up-axis`/`--forward-axis`
+  set the output's coordinate-system convention (Blender's X/Y/Z/-X/-Y/-Z vocabulary) -- glTF
+  only accepts up-axis Y or Z and has no forward-axis control at all (its spec is fixed Y-up);
+  ABC and .blend have no axis-orientation control in Blender at all.
 - **`split.py`** -- split one multi-object file into one output file per independent object
   hierarchy (a root object with no parent, plus every descendant), so a skinned mesh stays with
   its armature while an unrelated standalone object becomes its own file.
