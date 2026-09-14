@@ -87,8 +87,12 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   those into its own representation and doesn't expose which ones the source file declared, and
   duplicate-mesh/instancing detection (objects already sharing one mesh datablock, reported as
   data; objects on *separate* datablocks with identical geometry, flagged as a real "could share
-  one datablock" memory-saving opportunity), each defect naming its fix command where a safe one
-  exists.
+  one datablock" memory-saving opportunity), and (`.obj` only) the referenced `.mtl`'s per-
+  material Phong parameters (Ka/Kd/Ks/Ns/d/illum) alongside the same Ns-to-roughness heuristic
+  Blender's own OBJ importer applies -- confirmed to match its real output exactly -- since
+  OBJ/MTL predates PBR and has no metallic/roughness channels of its own (metallic is never
+  guessed: no reliable signal separates a metal from a shiny dielectric in Phong parameters
+  alone), each defect naming its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill

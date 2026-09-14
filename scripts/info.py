@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _common
 import _formats
 import _gltf_extensions
+import _obj_mtl
 import _run
 from _common import SkillError
 
@@ -86,6 +87,10 @@ def main() -> int:
     # KHR_* extensions into its own representation and doesn't expose which ones the source file
     # declared (see scripts/_gltf_extensions.py's docstring).
     data["gltf_extensions"] = _gltf_extensions.read_extensions(str(path)) if fmt == "gltf" else None
+    # OBJ/MTL predates PBR entirely -- read the raw .mtl's Phong parameters and Blender's own
+    # confirmed Ns->roughness heuristic directly, since none of that survives as bpy state to
+    # inspect after import (see scripts/_obj_mtl.py's docstring).
+    data["obj_materials"] = _obj_mtl.read_materials(str(path)) if fmt == "obj" else None
     if args.compact:
         print(json.dumps(_compact(data), sort_keys=True))
     elif args.json:
