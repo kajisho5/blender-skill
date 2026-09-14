@@ -12,8 +12,8 @@ what v0.1.0 actually does.
 | ID | Area | Title | Status | Issue |
 |----|------|-------|--------|-------|
 | RM-001 | inspect | 非マニフォールド・自己交差・裏返し法線の検出と修正提案 | done | #4 |
-| RM-002 | inspect | スケール異常検出（cm/m混在、単位未設定）と`--fix-scale` | planned | #5 |
-| RM-003 | inspect | 原点ずれ検出と`--origin center\|bottom\|keep` | planned | #6 |
+| RM-002 | inspect | スケール異常検出（cm/m混在、単位未設定）と`--fix-scale` | done | #5 |
+| RM-003 | inspect | 原点ずれ検出と`--origin center\|bottom\|keep` | done | #6 |
 | RM-004 | inspect | テクスチャ欠損・パス切れ・過大解像度の一覧 | done | |
 | RM-005 | inspect | マテリアル未割当・空スロット検出 | done | |
 | RM-006 | inspect | UVの重なり・範囲外・未展開検出 | planned | #7 |

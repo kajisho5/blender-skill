@@ -33,11 +33,15 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   box, non-manifold-edge and duplicate-vertex detection (computed on a welded scratch copy, so a
   perfectly normal hard-edged/UV-seamed mesh isn't misreported as broken), approximate
   self-intersection detection, flipped-normal detection (only reported when trustworthy -- see
-  below), UV presence, each defect naming its fix command where a safe one exists.
+  below), unapplied-scale detection (a common cm/m unit-mismatch symptom), origin offset from each
+  object's own bounding-box center/bottom-center (data, not a defect -- an off-center origin is
+  often deliberate), UV presence, each defect naming its fix command where a safe one exists.
 - **`convert.py`** -- glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend, any direction;
   `--verify` re-imports the output and diffs it against the input.
 - **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
-  boundary-edge holes (`--fill-holes`), cap texture resolution, purge orphan data;
+  boundary-edge holes (`--fill-holes`), bake unapplied scale into the mesh (`--fix-scale`),
+  recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
+  resolution, purge orphan data;
   `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
