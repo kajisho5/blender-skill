@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.4.0...blender-skill-v0.5.0) (2026-09-14)
+
+
+### Features
+
+* **info:** UV out-of-bounds/zero-area/overlap detection (RM-006) ([#104](https://github.com/kajisho5/blender-skill/issues/104)) ([409945d](https://github.com/kajisho5/blender-skill/commit/409945d7c4214e8113067673a7361266077d4389))
+
 ## [0.4.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.3.0...blender-skill-v0.4.0) (2026-09-14)
 
 
