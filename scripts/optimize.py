@@ -44,6 +44,8 @@ def main() -> int:
     ap.add_argument("--recalc-normals", action="store_true", help="recalculate outside-facing normals")
     ap.add_argument("--triangulate", action="store_true")
     ap.add_argument("--texture-max", type=int, metavar="PX", help="downscale any texture wider/taller than this")
+    ap.add_argument("--texture-auto-resolution", action="store_true", help="downscale each texture to its own computed cap instead of one flat --texture-max: derived from how much of the whole file's combined bounding box the largest object using that texture spans (screen-occupancy proxy) times --viewport-width, rounded to the next power of two. Rejected together with --texture-max.")
+    ap.add_argument("--viewport-width", type=int, metavar="PX", default=1920, help="assumed viewport width for --texture-auto-resolution (default 1920)")
     ap.add_argument("--purge-unused", action="store_true", help="remove orphan data blocks (unused meshes/materials/images/actions) after other operations")
     ap.add_argument("--point-thin-voxel", type=float, metavar="SIZE", help="thin a point cloud (a vertices-only mesh, e.g. from PLY scan data) by voxel-grid downsampling: keep one point per SIZE-sized grid cell. No-op on any mesh that has faces -- use --decimate-ratio for those.")
     ap.add_argument("--webp", action="store_true", help="convert every texture to WebP on export (glb/gltf output only; adds the EXT_texture_webp extension). Not always smaller -- WebP at default quality can exceed a well-compressed PNG for some textures; the reported before/after byte counts are measured, never assumed.")
@@ -63,6 +65,8 @@ def main() -> int:
         ap.error("--draco and --meshopt are alternative geometry compressors -- give at most one")
     if args.fix_colorspace and args.texture_colorspace:
         ap.error("--fix-colorspace (per-socket correction) and --texture-colorspace (force everything to one value) are alternatives -- give at most one")
+    if args.texture_max and args.texture_auto_resolution:
+        ap.error("--texture-max (one flat cap) and --texture-auto-resolution (a computed per-texture cap) are alternatives -- give at most one")
 
     try:
         in_path = _common.require_exists(args.input, "input")
@@ -81,6 +85,7 @@ def main() -> int:
             "decimate_ratio": args.decimate_ratio, "fill_holes": args.fill_holes, "weld_doubles": args.weld_doubles,
             "recalc_normals": args.recalc_normals, "triangulate": args.triangulate,
             "texture_max": args.texture_max, "purge_unused": args.purge_unused,
+            "texture_auto_resolution": args.texture_auto_resolution, "viewport_width": args.viewport_width,
             "target": args.target, "fix_scale": args.fix_scale, "origin": args.origin,
             "point_thin_voxel": args.point_thin_voxel,
             "webp": args.webp, "webp_quality": args.webp_quality,
@@ -146,7 +151,8 @@ def main() -> int:
         if data["points_thinned"]:
             print(f"  thinned {data['points_thinned']} point(s) from the point cloud")
         for t in data["textures_resized"]:
-            print(f"  texture {t['name']}: {t['from']} -> {t['to']}")
+            cap_note = f" (auto cap {t['cap']})" if "cap" in t else ""
+            print(f"  texture {t['name']}: {t['from']} -> {t['to']}{cap_note}")
         if args.webp:
             before, after = data.get("texture_bytes_before"), data.get("texture_bytes_after")
             if before is not None and after is not None:

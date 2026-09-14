@@ -548,9 +548,24 @@ temporarily disabling the strip and reading each output's raw glTF JSON): the *e
 were not actually contaminated even without the strip -- Blender's own whole-scene export
 already excludes anything in the "glTF_not_exported" collection the widget lives in, unlike the
 *selection*-based export `split.py` uses, which is what made RM-027's version a real deliverable
-bug rather than just a reporting one. `optimize.py`'s existing `--decimate-ratio` has this same
-lighter version today (confirmed: `triangles_before`/`triangles_after` for fox.glb are inflated
-by the same 80, though its output file is unaffected for the same whole-scene-export reason) --
-not fixed here, since it's a pre-existing, separately-shipped script and out of scope for this
-change, but worth knowing before trusting either script's reported counts on a skinned-armature
-glTF input right down to the exact triangle.
+bug rather than just a reporting one. `optimize.py`'s existing `--decimate-ratio` had this same
+lighter version too (`triangles_before`/`triangles_after` for fox.glb inflated by the same 80,
+output file unaffected) -- fixed in RM-033's PR once back in that file for other reasons, since
+the fix is the same one-line strip and by then two separately-shipped scripts had the same gap.
+
+## Screen-occupancy without a real camera: scene-relative bounding-box size as the proxy
+
+`optimize.py --texture-auto-resolution` (RM-033) needed a "how much of the screen would this
+texture's object occupy" signal with no actual camera, FOV, or viewport this skill has any way
+to know (headless Blender here never renders through a specific shot). The proxy used: each
+object's own world-space bounding-box diagonal, divided by the *whole file's combined* bounding
+box diagonal across every mesh object -- i.e., how big this object is relative to everything
+else in the same file, which is a real, data-driven number straight from the geometry, not a
+guess. That fraction times an assumed `--viewport-width` (default 1920), rounded up to the next
+power of two, becomes that texture's cap. Verified on a fixture with a 10-unit and a 1-unit cube
+20 units apart, each with its own 512x512 texture: the small one's texture got downscaled to a
+correspondingly small cap (128 at the default viewport width) while the big one's cap (2048)
+came out above its actual size and was correctly left untouched. A file with exactly one mesh
+object degenerates cleanly to fraction 1.0 (that object's own bounding box IS the whole scene's),
+capping its textures at the full assumed viewport width -- the sensible default for a single
+hero asset with no other objects to be smaller than.
