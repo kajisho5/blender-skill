@@ -103,6 +103,68 @@ def export_selected(path: str, fmt: str, **kwargs) -> None:
     export_file(path, fmt, **kwargs)
 
 
+def strip_import_helper_objects() -> list:
+    """Remove every object Blender's own importer synthesized as a bone custom-shape display
+    widget, never real content from the source file. Confirmed on real Blender 4.2.23: glTF
+    import of ANY skinned armature -- with or without a mesh, fox.glb's own real mesh included --
+    creates one small mesh object (named "Icosphere" in every case tested), parks it in an
+    auto-created "glTF_not_exported" collection, and assigns it as every pose bone's
+    `custom_shape` purely so bones show as spheres in the viewport instead of Blender's default
+    stick shape. It is not an unreachable node from the file's own JSON (fox.glb's raw glTF has
+    no "Icosphere" node/mesh at all -- verified directly against the file's own JSON chunk) and
+    must not be treated as independent content: split.py splitting it into its own output file,
+    or anim.py --combine leaking it into a combined character file, are both real defects this
+    fixes, not a legitimate "extra object" in the source. Detected by the one property that's
+    actually true of it and nothing else: it's referenced as some armature's pose-bone
+    custom_shape. Returns the removed object names, for callers that want to report them.
+    """
+    helper_names = set()
+    for arm_obj in bpy.data.objects:
+        if arm_obj.type != "ARMATURE" or arm_obj.pose is None:
+            continue
+        for pb in arm_obj.pose.bones:
+            if pb.custom_shape is not None:
+                helper_names.add(pb.custom_shape.name)
+    removed = []
+    for name in helper_names:
+        obj = bpy.data.objects.get(name)
+        if obj is not None:
+            removed.append(obj.name)
+            bpy.data.objects.remove(obj, do_unlink=True)
+    return removed
+
+
+# format -> export kwargs that make every action currently in bpy.data.actions come out as its
+# own separate output animation clip, used by anim.py --combine. Confirmed on real Blender
+# 4.2.23 (tests/test_all.py): glTF's export_animation_mode='ACTIONS' already does this by
+# default reasoning (no NLA setup needed) -- it exports every action whose pose-bone fcurve
+# paths match an armature actually present in the scene, and silently skips one that doesn't
+# (confirmed with a deliberately mismatched action; see references/pitfalls.md), so an action
+# merely needs to survive in bpy.data (e.g. via use_fake_user) to be picked up, not be assigned
+# to any particular object. FBX has no equivalent "ACTIONS" enum but reaches the same result via
+# bake_anim_use_all_actions (bake_anim_use_nla_strips=False so it doesn't instead look for NLA
+# strips, which combine never creates). Every other format either has no multi-action animation
+# export concept this skill has verified, or (blend) always saves everything already.
+_MULTI_ACTION_KWARGS = {
+    "gltf": {"export_animation_mode": "ACTIONS"},
+    "fbx": {"bake_anim": True, "bake_anim_use_all_actions": True, "bake_anim_use_nla_strips": False},
+}
+
+
+def export_multi_action(path: str, fmt: str, **kwargs) -> None:
+    """Like export_file, but every action currently kept alive in bpy.data.actions (regardless
+    of which object, if any, is using it right now) is exported as its own animation clip --
+    used by anim.py --combine to merge several separately-sourced actions (e.g. downloaded
+    Mixamo animations sharing one character's bone names) into a single output file. Raises
+    ValueError for a format with no tested multi-action export path.
+    """
+    if fmt not in _MULTI_ACTION_KWARGS:
+        raise ValueError(f"{fmt!r} has no multi-action export support")
+    merged = dict(_MULTI_ACTION_KWARGS[fmt])
+    merged.update(kwargs)
+    export_file(path, fmt, **merged)
+
+
 def eevee_engine_id() -> str:
     """The real-time engine's RNA identifier renamed between versions: Blender 4.2-4.5 shipped
     the new Eevee under 'BLENDER_EEVEE_NEXT' (with the legacy engine removed); Blender 5.0

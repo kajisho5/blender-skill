@@ -571,44 +571,108 @@ class TestToolchain(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
 
     def test_split_separates_independent_hierarchies(self):
-        # fox.glb: "fox" (mesh) is parented to "root" (armature) via both Object parenting and
-        # an Armature modifier -- root+fox must stay one group. "Icosphere" has no parent at all
-        # and must become its own, separate group. Blender's glTF importer also parks Icosphere
-        # in an auto-created "glTF_not_exported" collection (confirmed: hide_viewport=True on
-        # that collection); see references/pitfalls.md for why merely unhiding it wasn't enough.
+        # two_props.glb: PropA and PropB, two plain cubes with no parent relationship at all --
+        # each must become its own group.
         out_dir = self.out / "split"
-        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--json")
+        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "two_props.glb"), "--out-dir", str(out_dir), "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
         groups = {g["root_object"]: g for g in data["groups"]}
-        self.assertEqual(set(groups), {"root", "Icosphere"})
-        self.assertEqual(set(groups["root"]["objects"]), {"root", "fox"})
-        self.assertEqual(groups["Icosphere"]["objects"], ["Icosphere"])
+        self.assertEqual(set(groups), {"PropA", "PropB"})
+        self.assertEqual(groups["PropA"]["objects"], ["PropA"])
+        self.assertEqual(groups["PropB"]["objects"], ["PropB"])
+        for g in data["groups"]:
+            self.assertGreater(Path(g["output"]).stat().st_size, 1000)  # not the empty-export symptom (132 bytes)
 
-    def test_split_outputs_are_valid_and_reimportable(self):
-        # The real regression this guards: before the "glTF_not_exported"-collection fix, the
-        # Icosphere output was an empty/near-empty 132-byte file that still "succeeded".
+    def test_split_keeps_a_skinned_mesh_with_its_armature_as_one_group(self):
+        # fox.glb: "fox" (mesh) is parented to "root" (armature) via both Object parenting and
+        # an Armature modifier -- must stay one single group, not two. Blender's own glTF
+        # importer additionally synthesizes a small "Icosphere" mesh object on import (a shared
+        # bone custom-shape display widget for every pose bone, confirmed absent from fox.glb's
+        # own JSON -- see references/pitfalls.md); split.py must not misidentify that as its own
+        # independent hierarchy and export it as a spurious file.
         out_dir = self.out / "split"
         proc = run("split.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
-        outputs = {g["root_object"]: Path(g["output"]) for g in data["groups"]}
+        self.assertEqual(len(data["groups"]), 1)
+        group = data["groups"][0]
+        self.assertEqual(group["root_object"], "root")
+        self.assertEqual(set(group["objects"]), {"root", "fox"})
+        self.assertNotIn("Icosphere", group["objects"])
 
-        ico_path = outputs["Icosphere"]
-        self.assertGreater(ico_path.stat().st_size, 1000)  # not the empty-export symptom (132 bytes)
-        ico_info = json.loads(run("info.py", str(ico_path), "--json").stdout)
-        self.assertEqual(ico_info["objects"]["by_type"], {"MESH": 1})
-        self.assertEqual(ico_info["armatures"], [])
-
-        root_path = outputs["root"]
-        root_info = json.loads(run("info.py", str(root_path), "--json").stdout)
+        root_info = json.loads(run("info.py", str(group["output"]), "--json").stdout)
         self.assertEqual(len(root_info["armatures"]), 1)
         self.assertEqual(root_info["armatures"][0]["bone_count"], 24)
         self.assertEqual(len(root_info["animations"]), 3)  # Run_root, Survey_root, Walk_root all kept
 
     def test_split_rejects_blend_output_format(self):
         out_dir = self.out / "split_blend"
-        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--out-dir", str(out_dir), "--format", "blend", "--json")
+        proc = run("split.py", str(ROOT / "tests" / "fixtures" / "two_props.glb"), "--out-dir", str(out_dir), "--format", "blend", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_anim_extract_keeps_only_the_armature_and_every_action(self):
+        out = self.out / "fox_anim_only.glb"
+        proc = run("anim.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--extract", "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(set(data["actions"]), {"Run_root", "Survey_root", "Walk_root"})
+        self.assertEqual(data["armatures_kept"], ["root"])
+
+        import struct as _struct
+        with open(out, "rb") as f:
+            f.read(12)
+            chunk_len, _chunk_type = _struct.unpack("<II", f.read(8))
+            gltf = json.loads(f.read(chunk_len))
+        self.assertEqual(gltf.get("meshes", []), [])  # mesh-free -- animation only, as documented
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(len(info["armatures"]), 1)
+        self.assertEqual(len(info["animations"]), 3)
+
+    def test_anim_extract_action_filter_keeps_only_the_named_action(self):
+        out = self.out / "fox_walk_only.glb"
+        proc = run("anim.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--extract", "--action", "Walk_root", "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["actions"], ["Walk_root"])
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual([a["name"] for a in info["animations"]], ["Walk_root"])
+
+    def test_anim_combine_merges_separate_files_without_leaking_extra_objects(self):
+        # A Mixamo-style workflow: a rigged character (here, fox.glb itself, already carrying 3
+        # actions) combined with 2 more animation-only files (each produced exactly as anim.py
+        # --extract would) sharing the same bone names.
+        run_only = self.out / "run_only.glb"
+        survey_only = self.out / "survey_only.glb"
+        for action, out in (("Run_root", run_only), ("Survey_root", survey_only)):
+            proc = run("anim.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--extract", "--action", action, "-o", str(out))
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        combined = self.out / "combined.glb"
+        proc = run("anim.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "--combine", str(run_only), str(survey_only), "-o", str(combined), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["combined"]), 2)
+
+        # The real regression this guards: Blender's own synthesized bone-shape widget from the
+        # *base* file's import must not leak into the combined output as a spurious extra mesh
+        # (each anim source's own copy is already discarded by the new-object diff regardless).
+        import struct as _struct
+        with open(combined, "rb") as f:
+            f.read(12)
+            chunk_len, _chunk_type = _struct.unpack("<II", f.read(8))
+            gltf = json.loads(f.read(chunk_len))
+        self.assertEqual([m["name"] for m in gltf.get("meshes", [])], ["fox1"])
+        self.assertEqual(len(gltf.get("animations", [])), 5)  # base's 3 + the 2 combined
+
+    def test_anim_combine_rejects_unsupported_output_format(self):
+        out = self.out / "combined.obj"
+        proc = run(
+            "anim.py", str(ROOT / "tests" / "fixtures" / "fox.glb"),
+            "--combine", str(ROOT / "tests" / "fixtures" / "fox.glb"),
+            "-o", str(out), "--json",
+        )
         self.assertNotEqual(proc.returncode, 0)
 
     def test_convert_and_verify_roundtrip(self):
