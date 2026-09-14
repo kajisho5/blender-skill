@@ -17,6 +17,39 @@ import mathutils
 from mathutils.bvhtree import BVHTree
 
 
+# Non-internal mesh attributes Blender itself creates that are not something a user/importer
+# added -- Mesh.Attribute.is_internal is False for these too (it only flags the dot-prefixed
+# bookkeeping ones like .corner_vert), so they must be excluded by name. Confirmed present on a
+# plain cube with no custom data at all: position, sharp_face, UVMap (one per UV layer, already
+# reported via uv_maps/has_uv); adding a second material slot, a bevel weight and an edge crease
+# via ordinary edit-mode operators adds material_index, bevel_weight_edge, and crease_edge the
+# same way -- confirmed on real Blender, not from documentation alone.
+_BUILTIN_ATTR_NAMES = {
+    "position", "sharp_face", "sharp_edge", "material_index",
+    "crease_edge", "crease_vert", "bevel_weight_edge", "bevel_weight_vert", "id",
+}
+
+
+def _attribute_lists(obj):
+    """Vertex color layers (Mesh.color_attributes) and any other genuinely custom mesh attribute
+    (Mesh.attributes minus internal bookkeeping, Blender's own built-ins, UV layers already
+    reported elsewhere, and color layers already listed separately). Confirmed on a real cube
+    with two materials, a bevel weight, an edge crease, one vertex color layer and two custom
+    attributes added: reports exactly the one color layer and the two custom attributes, nothing
+    else -- and confirmed empty on tests/fixtures/box.glb and fox.glb (neither has any).
+    """
+    mesh = obj.data
+    uv_names = {uv.name for uv in mesh.uv_layers}
+    color_names = {ca.name for ca in mesh.color_attributes}
+    vertex_colors = [{"name": ca.name, "domain": ca.domain, "data_type": ca.data_type} for ca in mesh.color_attributes]
+    custom = []
+    for a in mesh.attributes:
+        if a.is_internal or a.name in _BUILTIN_ATTR_NAMES or a.name in uv_names or a.name in color_names:
+            continue
+        custom.append({"name": a.name, "domain": a.domain, "data_type": a.data_type})
+    return vertex_colors, custom
+
+
 def _self_intersecting_faces(bm) -> int:
     """Approximate count of face pairs that actually overlap in 3D space, not just at a shared
     edge/vertex. BVHTree.overlap() reports every pair of triangles whose bounding boxes touch,
@@ -238,6 +271,7 @@ def _mesh_stats(obj):
     uv_layers = len(obj.data.uv_layers)
     empty_slots = sum(1 for slot in obj.material_slots if slot.material is None)
     origin_to_center, origin_to_bottom_center = _local_bbox_reference_points(obj)
+    vertex_colors, custom_attributes = _attribute_lists(obj)
     return {
         "triangles": triangles,
         "vertices": vertex_count,
@@ -253,6 +287,8 @@ def _mesh_stats(obj):
         "scale": list(obj.scale),
         "origin_offset_from_center": list(origin_to_center),
         "origin_offset_from_bottom_center": list(origin_to_bottom_center),
+        "vertex_colors": vertex_colors,
+        "custom_attributes": custom_attributes,
     }
 
 

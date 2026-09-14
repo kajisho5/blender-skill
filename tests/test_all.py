@@ -23,6 +23,7 @@ SCALED_FIXTURE = ROOT / "tests" / "fixtures" / "scaled_cube.glb"
 OFFSET_ORIGIN_FIXTURE = ROOT / "tests" / "fixtures" / "offset_origin_cube.glb"
 ZERO_AREA_UV_FIXTURE = ROOT / "tests" / "fixtures" / "zero_area_uv_cube.glb"
 OVERLAPPING_UV_FIXTURE = ROOT / "tests" / "fixtures" / "overlapping_uv_cubes.glb"
+VERTEX_COLORS_FIXTURE = ROOT / "tests" / "fixtures" / "vertex_colors_cube.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -181,6 +182,30 @@ class TestToolchain(unittest.TestCase):
         uv = json.loads(proc.stdout)["meshes"]["per_object"][0]["uv_checks"]
         self.assertEqual(uv["overlapping_faces_approx"], 0)
         self.assertEqual(uv["zero_area_faces"], 0)
+
+    def test_info_lists_vertex_colors_and_custom_attributes(self):
+        # vertex_colors_cube.blend: one vertex color layer plus two genuinely custom mesh
+        # attributes (a per-vertex float, a per-face int), alongside Blender's own non-internal
+        # built-ins (position, material_index, bevel_weight_edge, crease_edge, UVMap -- none of
+        # which should show up here). A .blend fixture, not .glb: glTF export drops generic
+        # custom attributes entirely (confirmed -- see references/pitfalls.md), so a glb fixture
+        # could never exercise custom_attributes at all.
+        proc = run("info.py", str(VERTEX_COLORS_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        stats = json.loads(proc.stdout)["meshes"]["per_object"][0]
+        self.assertEqual([vc["name"] for vc in stats["vertex_colors"]], ["Col"])
+        self.assertEqual(
+            {(a["name"], a["data_type"]) for a in stats["custom_attributes"]},
+            {("my_weight", "FLOAT"), ("my_id", "INT")},
+        )
+
+    def test_info_reports_no_vertex_colors_or_custom_attributes_on_plain_fixtures(self):
+        for fixture in (FIXTURE, ROOT / "tests" / "fixtures" / "fox.glb"):
+            proc = run("info.py", str(fixture), "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            for stats in json.loads(proc.stdout)["meshes"]["per_object"]:
+                self.assertEqual(stats["vertex_colors"], [])
+                self.assertEqual(stats["custom_attributes"], [])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match
