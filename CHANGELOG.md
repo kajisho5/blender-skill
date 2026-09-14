@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.12.0...blender-skill-v0.13.0) (2026-09-14)
+
+
+### Features
+
+* **info:** duplicate mesh / instancing detection (RM-015) ([#121](https://github.com/kajisho5/blender-skill/issues/121)) ([b3426cc](https://github.com/kajisho5/blender-skill/commit/b3426ccef8ffc7005252ac2e7c295adb6df64f0f))
+
 ## [0.12.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.11.0...blender-skill-v0.12.0) (2026-09-14)
 
 
