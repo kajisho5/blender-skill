@@ -1,0 +1,33 @@
+name: Roadmap item
+description: Track one item from ROADMAP.md (usually filed by scripts/dev/roadmap_to_issues.py)
+labels: [roadmap]
+body:
+  - type: input
+    id: roadmap-id
+    attributes:
+      label: ROADMAP.md ID
+      placeholder: "e.g. RM-042"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What this item covers
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - inspect
+        - convert
+        - optimize
+        - render
+        - bake
+        - scene
+        - agent-ux
+        - ecosystem
+        - reliability
+    validations:
+      required: true

@@ -1,0 +1,20 @@
+# release-please resolves the next version from Conventional Commits on main -- for a squash-
+# merged PR, the PR title *becomes* that commit, so an off-convention title silently resolves to
+# "no bump" or the wrong bump. Enforcing the title format here is what makes that resolution
+# reliable, not just a style preference.
+name: lint-pr-title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

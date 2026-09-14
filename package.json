@@ -1,14 +1,17 @@
 {
   "name": "blender-skill",
-  "version": "0.1.0",
-  "description": "Agent Skill scaffolding that gives coding agents (Claude Code, Cursor, Codex) local, headless Blender tools. Scaffolding only for now -- no tools implemented yet.",
+  "version": "0.2.1",
+  "description": "Agent Skill that gives coding agents (Claude Code, Cursor, Codex) a local 3D asset pipeline: inspect, convert, optimize, render, bake and validate glb/gltf/fbx/obj/stl/usd/usdz/ply/abc/.blend files via headless Blender. No API keys, no cloud, no pip dependencies.",
   "keywords": [
     "blender",
     "3d",
+    "gltf",
+    "fbx",
     "agent-skill",
     "claude-code",
     "cursor",
     "codex",
+    "mcp",
     "skill"
   ],
   "license": "MIT",
@@ -25,12 +28,14 @@
   "files": [
     "bin/",
     "scripts/",
+    "mcp/",
+    "references/",
     "SKILL.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node bin/install.js --help >/dev/null"
+    "test": "python3 tests/test_all.py"
   },
   "engines": {
     "node": ">=16"

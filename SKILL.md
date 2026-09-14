@@ -1,11 +1,101 @@
 ---
 name: blender-skill
-description: 'TODO: describe what this skill lets a coding agent do with local, headless Blender (e.g. import/export, scene assembly, rendering, animation) and when it should trigger. Placeholder -- no tools implemented yet.'
+description: 'Inspect, convert, optimize, render, bake and validate 3D assets with local, headless Blender: glb/gltf, fbx, obj, stl, usd/usdz, ply, abc, .blend. Cut triangle count, cap texture resolution, bake AO/normal/roughness/diffuse/combined maps, render a thumbnail/turntable/4-view sheet, check a file against three.js/Unity/Unreal/Godot/iOS-AR/Android-AR/WebXR/3D-print/Sketchfab budgets, assemble a multi-asset scene. Use this skill whenever the user mentions a 3D model or asset file (glb, gltf, fbx, obj, stl, usd, usdz, ply, blend), a mesh, polycount/triangle count, UV, texture baking, decimation, a turntable render, an AR/game-engine import, or asks to check/optimize/convert/render something "for Unity", "for Unreal", "for the web", "for AR" -- even when they do not say "Blender". Headless only (`blender -b`); this is not a replacement for interactive modeling or the official Blender MCP add-on, and complements rather than competes with it. Requires Blender 4.2+ on the machine; no API keys, no cloud, no pip dependencies.'
+version: 0.2.1  # x-release-please-version
 ---
 
 # blender-skill
 
-TODO: this file is a placeholder. Fill in the workflow this skill follows (in the style of
-`ffmpeg-skill`'s `SKILL.md`: a routing table from request to script, shared flags, a
-probe-first/verify-last workflow, and what this skill deliberately does not decide) once the
-first `scripts/*.py` tools exist.
+Scripts live in `scripts/` next to this file; run them with `python3 <skill-dir>/scripts/<name>.py`.
+Each is a thin host-side CLI (stdlib only) that launches Blender headless
+(`blender -b --factory-startup --python scripts/bpy/<name>.py -- args.json result.json`) and
+reads back a JSON result written to disk -- never by parsing Blender's own log output. `--help`
+on the script you are about to run is the cheapest full flag list; `references/pitfalls.md` is
+the long form of real gotchas hit building this (GPU-offscreen limits under `-b`, format
+roundtrip quirks, an Eevee engine-name rename between Blender versions) -- read it when
+something behaves unexpectedly rather than guessing.
+
+Shared flags, on every script: `--json` (structured result instead of a one-line summary --
+prefer it for anything you'll act on programmatically); `--blender PATH` (override Blender
+discovery: `--blender` > `$BLENDER` > `PATH` > the OS's usual install location); `--timeout
+SECONDS` (default 1800). Writing tools also take `--dry-run` (prints the Blender command and
+bpy script that would run, without running it) and `--fast` (lower-quality/fewer-samples
+preview).
+
+## Workflow (always follow this order)
+
+0. **Never assume Blender is installed.** A script fails with `kind: missing_tool` and an
+   install hint per OS if it can't find one -- report that, don't guess a path.
+1. **Probe before you operate.** Run `info.py` on every input you plan to change: object/mesh/
+   material/texture/animation counts, unit scale, bounding box, non-manifold-edge and UV
+   presence. It welds a scratch copy of each mesh before checking manifoldness, so a perfectly
+   normal hard-edged/UV-seamed asset isn't misreported as broken (`references/pitfalls.md`).
+   Plan from these real numbers, never assumptions about what a file "probably" contains.
+2. **Operate with the narrowest tool for the job.** A pure format swap is `convert.py`, not
+   `optimize.py` with no flags. Chain tools when the user's request genuinely needs more than
+   one (e.g. decimate, then bake, then check).
+3. **Verify, don't assume, that a conversion is faithful.** `convert.py --verify` re-imports the
+   output and diffs object/triangle/vertex/material/animation counts against the input. A diff
+   is not automatically a bug -- STL has no shared-vertex index buffer at all (a cube: 24 -> 36
+   vertices is inherent to the format, not a defect) -- but report what changed rather than
+   silently trusting the conversion.
+4. **Check the deliverable against where it's going.** `check.py FILE --target NAME` (three.js,
+   unity, unreal, godot, ios-ar, android-ar, webxr, 3d-print, sketchfab) PASS/WARN/FAILs against
+   this tool's own conservative budgets (not each platform's official published numbers, which
+   are unpublished or change over time -- treat a WARN as "worth checking against that target's
+   current docs"), and every row that can be fixed mechanically names the exact fix command.
+5. **Look at the picture whenever the geometry or texture changed.** `look.py --wireframe` (a
+   real render with every mesh shown as wireframe), `--textures` (a grid of every texture in the
+   file), `--compare BEFORE AFTER` (two renders side by side), `--uv` (UV layout as SVG --
+   headless Blender's PNG UV export needs a GPU offscreen context that `-b` doesn't have; SVG is
+   the only mode this uses, deliberately, not a limitation to work around). A probe cannot see
+   whether a decimated mesh still reads correctly, or a baked texture landed where expected.
+6. **Report exact numbers**, not vibes: triangle/vertex counts before and after, texture
+   dimensions, PASS/WARN/FAIL rows, `bake.py`'s pixel min/max/mean (a bake is mostly outside-UV
+   black background with real data concentrated in a comparatively small island -- verify with
+   those numbers, not by eyeballing a thumbnail at small size).
+7. **Never overwrite the user's original file.** Every script writes a new output
+   (`<input>_<operation>.<ext>` by convention, or wherever `-o`/`--out` points); nothing here
+   mutates an input in place.
+
+## Request → script
+
+| Script | Does |
+|---|---|
+| `info.py FILE` | Object/mesh/material/texture/animation/armature counts, unit scale, bounding box, non-manifold-edge and duplicate-vertex detection, UV presence. The foundation every other script leans on. |
+| `convert.py FILE -o OUT [--verify]` | Cross-format conversion: glb/gltf, fbx, obj, stl, usd, usdz, ply, abc, .blend. |
+| `optimize.py FILE -o OUT [--decimate-ratio R] [--weld-doubles] [--recalc-normals] [--triangulate] [--texture-max PX] [--purge-unused] [--target-web\|--target-mobile\|--target-ar] [--draco\|--meshopt] [--ktx2]` | Shrink triangle count, texture size, and orphan data; `--draco`/`--meshopt`/`--ktx2` delegate to gltf-transform (and, for `--ktx2`, the KTX-Software `ktx` CLI) if installed, otherwise say so and skip just that step. |
+| `render.py FILE -o OUT [--turntable] [--sheet] [--cycles] [--light studio\|outdoor]` | Thumbnail (default), 360° turntable (PNG sequence or FFmpeg-encoded video), or a 4-view sheet. |
+| `look.py FILE --uv\|--wireframe\|--textures -o OUT` / `look.py --compare A B -o OUT` | The agent's eyes: UV layout (SVG), a wireframe render, a texture grid, or a before/after comparison. |
+| `check.py FILE --target NAME` | PASS/WARN/FAIL against a delivery target's budget, with a fix command per row. |
+| `bake.py FILE --pass ao\|normal\|roughness\|diffuse\|combined -o OUT [--atlas]` | Bake a material to a texture; `--atlas` repacks UVs across several objects into one shared image first. |
+| `scene.py --init FILE` / `scene.py FILE.json [-o OUT] [--export OUT]` | Assemble a declarative scene (asset placement, lights, camera, background) into a render and/or an exported 3D file. |
+| `batch.py DIR --recipe RECIPE.json --out-dir OUT [--cache] [--watch]` | Chain this skill's own scripts as a recipe over every file in a folder, with a content-hash cache. |
+| `verify.py FILE... [--target NAME]` | The whole toolchain (info -> convert --verify -> check) over one or more files, PASS/FAIL per file. |
+
+`mcp/server.py` exposes every script above as an MCP tool over stdio; each tool takes the exact
+CLI `argv` as its one argument rather than a separate structured schema that could drift from
+what the CLI actually does.
+
+## What this skill does and does not decide
+
+This skill measures, converts, and mechanically transforms 3D files -- it does not make
+creative or content-understanding judgements:
+
+- **Whether a decimated/optimized result still looks right** -- `check.py` measures against a
+  budget, `look.py` renders it for you to judge; this skill doesn't decide "good enough" itself.
+- **What a scene should contain, or how it should be composed** -- `scene.py` assembles exactly
+  what a `scene.json` declares; deciding the layout, lighting mood, or camera angle is the
+  calling agent's or the user's call.
+- **Picking a subject, crop, or region not given explicitly** -- every script's parameters are
+  mechanical once known (a decimate ratio, a texture cap, a bake pass); choosing *what value* to
+  use for an ambiguous request belongs to the calling agent, from `info.py`'s real numbers.
+- **UV unwrapping or manifold/topology repair** -- `check.py` detects a missing UV map or
+  non-manifold geometry and says so; this skill does not (yet -- see ROADMAP.md) fix either
+  automatically. Say what's wrong and point at Blender's own UV/3D-Print tools rather than
+  guessing a fix.
+
+If a request needs a Blender feature none of these scripts expose, say so and name the closest
+built-in option -- never hand-write a raw `bpy` script outside `scripts/bpy/*.py` as a fallback.
+A raw script bypasses every guarantee this skill makes (no shell, typed arguments, verification
+afterwards, cross-Blender-version compatibility via `_compat.py`).

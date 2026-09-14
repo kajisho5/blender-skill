@@ -1,39 +1,198 @@
-# Runs on every pull request and on pushes to main (workflow_dispatch stays for manual runs).
-# Placeholder until the actual Blender scripts/tests exist: it only proves the installer runs
-# and, if scripts/ gains any Python, that they at least import cleanly.
+# Two jobs, split by cost:
+#   - matrix: every OS x every tracked Blender version, but only work that needs Blender
+#     installed and running -- not a GPU (info.py, convert.py --verify, optimize.py, check.py,
+#     batch.py, the installer). Cheap enough to run everywhere, on every PR.
+#   - render (ubuntu-latest only): the GPU-shaped tools (render.py, look.py's wireframe/
+#     textures modes, bake.py, scene.py's render output). Confirmed locally that Blender's
+#     Eevee/Cycles render headlessly under `-b` on Linux with Mesa's software OpenGL (llvmpipe)
+#     plus libEGL -- `bpy.ops.uv.export_layout(mode='PNG')` still can't (GPUOffScreen needs a
+#     real context even with software Mesa; look.py's --uv mode uses SVG for exactly this
+#     reason). macOS/Windows runners were not verified for this and are not in this job; a PR
+#     that gets that working is welcome, but this is not silently claimed to work there.
 name: tests
+
 on:
   workflow_dispatch:
   pull_request:
   push:
     branches: [main]
 
-# A push while this is still running on the same PR/branch makes the old run pointless -- its
-# result is about to be superseded anyway. Cancelling it saves Actions minutes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+env:
+  BLENDER_LTS_1: "4.2.23"
+  BLENDER_LTS_2: "4.5.13"
+
 jobs:
-  test:
+  resolve-latest:
     runs-on: ubuntu-latest
+    outputs:
+      latest: ${{ steps.resolve.outputs.latest }}
+    steps:
+      - id: resolve
+        run: |
+          LATEST=$(curl -sS -A "blender-skill-ci/1.0" https://download.blender.org/release/ \
+            | grep -oE 'Blender[0-9]+\.[0-9]+/' | sed -E 's/Blender|\///g' | sort -V | tail -1)
+          MINOR=$(curl -sS -A "blender-skill-ci/1.0" "https://download.blender.org/release/Blender${LATEST}/" \
+            | grep -oE "blender-${LATEST}\.[0-9]+-linux-x64\.tar\.xz" | sed -E 's/blender-|-linux-x64.tar.xz//g' | sort -V | tail -1)
+          echo "latest=$MINOR" >> "$GITHUB_OUTPUT"
+          echo "resolved latest Blender release: $MINOR"
+
+  matrix:
+    needs: resolve-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        blender: ["4.2.23", "4.5.13", "latest"]
+    runs-on: ${{ matrix.os }}
+    name: matrix (${{ matrix.os }}, blender ${{ matrix.blender }})
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "20"
-
-      - run: node bin/install.js --help
-
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
-      - name: Byte-compile any Python scripts (smoke test)
+      - name: Resolve Blender version
+        id: ver
+        shell: bash
         run: |
-          if [ -d scripts ] && [ -n "$(find scripts -name '*.py')" ]; then
-            python -m py_compile scripts/*.py
+          if [ "${{ matrix.blender }}" = "latest" ]; then
+            echo "version=${{ needs.resolve-latest.outputs.latest }}" >> "$GITHUB_OUTPUT"
           else
-            echo "no Python scripts yet"
+            echo "version=${{ matrix.blender }}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Cache Blender
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: blender-install
+          key: blender-${{ steps.ver.outputs.version }}-${{ runner.os }}
+
+      - name: Install Blender (Linux)
+        if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          MAJOR_MINOR=$(echo "${{ steps.ver.outputs.version }}" | cut -d. -f1,2)
+          curl -sS -A "blender-skill-ci/1.0" -o blender.tar.xz \
+            "https://download.blender.org/release/Blender${MAJOR_MINOR}/blender-${{ steps.ver.outputs.version }}-linux-x64.tar.xz"
+          mkdir -p blender-install
+          tar -xJf blender.tar.xz -C blender-install --strip-components=1
+      - name: Install Blender (macOS)
+        if: runner.os == 'macOS' && steps.cache.outputs.cache-hit != 'true'
+        run: |
+          MAJOR_MINOR=$(echo "${{ steps.ver.outputs.version }}" | cut -d. -f1,2)
+          curl -sS -A "blender-skill-ci/1.0" -o blender.dmg \
+            "https://download.blender.org/release/Blender${MAJOR_MINOR}/blender-${{ steps.ver.outputs.version }}-macos-arm64.dmg"
+          hdiutil attach blender.dmg -mountpoint /Volumes/Blender -quiet
+          mkdir -p blender-install
+          cp -R /Volumes/Blender/Blender.app blender-install/Blender.app
+          hdiutil detach /Volumes/Blender -quiet
+      - name: Install Blender (Windows)
+        if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $verParts = "${{ steps.ver.outputs.version }}".Split(".")
+          $majorMinor = "$($verParts[0]).$($verParts[1])"
+          Invoke-WebRequest -UserAgent "blender-skill-ci/1.0" -Uri "https://download.blender.org/release/Blender$majorMinor/blender-${{ steps.ver.outputs.version }}-windows-x64.zip" -OutFile blender.zip
+          Expand-Archive -Path blender.zip -DestinationPath blender-install
+
+      - name: Locate Blender binary
+        id: bin
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            echo "path=$PWD/blender-install/Blender.app/Contents/MacOS/Blender" >> "$GITHUB_OUTPUT"
+          elif [ "${{ runner.os }}" = "Windows" ]; then
+            echo "path=$(find blender-install -maxdepth 2 -iname 'blender.exe' | head -1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=$PWD/blender-install/blender" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Version-independent checks (no Blender needed)
+        shell: bash
+        run: |
+          python3 -m py_compile scripts/*.py scripts/bpy/*.py mcp/server.py
+          node bin/install.js --dir /tmp/skills-check
+          test -f /tmp/skills-check/blender-skill/SKILL.md
+
+      - name: info / convert --verify / optimize / check / batch
+        shell: bash
+        env:
+          BLENDER: ${{ steps.bin.outputs.path }}
+        run: |
+          "$BLENDER" --version
+          python3 scripts/info.py tests/fixtures/box.glb
+          # fbx keeps glb's shared-vertex topology, so --verify should match exactly; stl has no
+          # index buffer at all and a glb->stl roundtrip legitimately changes vertex count
+          # (see tests/test_all.py and references/pitfalls.md) -- not what this smoke test is for.
+          python3 scripts/convert.py tests/fixtures/box.glb -o /tmp/box.fbx --verify
+          python3 scripts/optimize.py tests/fixtures/box.glb -o /tmp/box_opt.glb --weld-doubles --purge-unused
+          python3 scripts/check.py tests/fixtures/box.glb --target 3d-print || true
+
+  render:
+    needs: resolve-latest
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        blender: ["4.2.23", "4.5.13", "latest"]
+    name: render (ubuntu-latest, blender ${{ matrix.blender }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Software OpenGL/EGL for headless Eevee/Cycles rendering
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libgles2 libegl-mesa0
+
+      - name: Resolve Blender version
+        id: ver
+        run: |
+          if [ "${{ matrix.blender }}" = "latest" ]; then
+            echo "version=${{ needs.resolve-latest.outputs.latest }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ matrix.blender }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cache Blender
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: blender-install
+          key: blender-${{ steps.ver.outputs.version }}-Linux
+
+      - name: Install Blender
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          MAJOR_MINOR=$(echo "${{ steps.ver.outputs.version }}" | cut -d. -f1,2)
+          curl -sS -A "blender-skill-ci/1.0" -o blender.tar.xz \
+            "https://download.blender.org/release/Blender${MAJOR_MINOR}/blender-${{ steps.ver.outputs.version }}-linux-x64.tar.xz"
+          mkdir -p blender-install
+          tar -xJf blender.tar.xz -C blender-install --strip-components=1
+
+      - name: render.py (thumbnail, turntable mp4, sheet) / look.py / bake.py / scene.py
+        env:
+          BLENDER: ${{ github.workspace }}/blender-install/blender
+        run: |
+          python3 scripts/render.py tests/fixtures/box.glb -o /tmp/thumb.png --fast
+          python3 scripts/render.py tests/fixtures/box.glb --turntable -o /tmp/turn.mp4 --frames 4 --fast --resolution 96 96
+          python3 scripts/render.py tests/fixtures/box.glb --sheet -o /tmp/sheet.png --fast --resolution 96 96
+          python3 scripts/look.py tests/fixtures/box.glb --wireframe -o /tmp/wire.png --fast
+          # fox.glb (not box.glb) has a UV map -- box.glb genuinely has none (that is itself a
+          # real assertion in tests/test_all.py), and both --uv and bake.py need one.
+          python3 scripts/look.py tests/fixtures/fox.glb --uv -o /tmp/uv.svg
+          python3 scripts/bake.py tests/fixtures/fox.glb --pass ao --size 64 --samples 4 -o /tmp/bake.png
+          python3 scripts/scene.py --init /tmp/scene.json
+          python3 -c "
+          import json
+          spec = json.load(open('/tmp/scene.json'))
+          spec['assets'][0]['file'] = '$PWD/tests/fixtures/box.glb'
+          json.dump(spec, open('/tmp/scene.json', 'w'))
+          "
+          python3 scripts/scene.py /tmp/scene.json -o /tmp/scene_render.png
+
+      - run: python3 tests/test_all.py
