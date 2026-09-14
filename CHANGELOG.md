@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.3.0...blender-skill-v0.4.0) (2026-09-14)
+
+
+### Features
+
+* **info,optimize:** scale-mismatch and origin-offset detection + fixes (RM-002, RM-003) ([#101](https://github.com/kajisho5/blender-skill/issues/101)) ([4c2c473](https://github.com/kajisho5/blender-skill/commit/4c2c473f0f8961e30cd663a4d3d4fb9d3e70e948))
+
+
+### Documentation
+
+* add a real demo section to README ([#103](https://github.com/kajisho5/blender-skill/issues/103)) ([c6e6ca3](https://github.com/kajisho5/blender-skill/commit/c6e6ca31ecb83e9f9fc6848884549989671e9eed))
+
 ## [0.3.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.2.1...blender-skill-v0.3.0) (2026-09-14)
 
 
