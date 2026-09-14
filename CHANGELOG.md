@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.7.0...blender-skill-v0.8.0) (2026-09-14)
+
+
+### Features
+
+* **info:** bone hierarchy and unweighted-vertex detection (RM-009) ([#110](https://github.com/kajisho5/blender-skill/issues/110)) ([69294f2](https://github.com/kajisho5/blender-skill/commit/69294f291ca54a25804a347d77e89b126ff00c6c))
+
 ## [0.7.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.6.0...blender-skill-v0.7.0) (2026-09-14)
 
 
