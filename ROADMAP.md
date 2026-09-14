@@ -16,7 +16,7 @@ what v0.1.0 actually does.
 | RM-003 | inspect | 原点ずれ検出と`--origin center\|bottom\|keep` | done | #6 |
 | RM-004 | inspect | テクスチャ欠損・パス切れ・過大解像度の一覧 | done | |
 | RM-005 | inspect | マテリアル未割当・空スロット検出 | done | |
-| RM-006 | inspect | UVの重なり・範囲外・未展開検出 | planned | #7 |
+| RM-006 | inspect | UVの重なり・範囲外・未展開検出 | done | #7 |
 | RM-007 | inspect | 頂点カラー/カスタム属性の一覧 | planned | #8 |
 | RM-008 | inspect | アニメーションクリップ一覧（長さ・fps・ボーン数・ルートモーション有無） | planned | #9 |
 | RM-009 | inspect | ボーン階層と重み未割当頂点の検出 | planned | #10 |

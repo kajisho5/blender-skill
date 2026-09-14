@@ -196,6 +196,21 @@ feet) -- flagging every one of those as "wrong" would be actively incorrect advi
 an agent or user has decided that specific convention is what they want, never applied on info.py's
 own initiative.
 
+## UV overlap detection needs exact 2D triangle overlap, not just bounding-box overlap
+
+The same bounding-box-overlap shortcut that works acceptably for the 3D self-intersection check
+(see above) is far too imprecise for UV space: a real, efficiently-packed UV layout has many
+faces whose UV *bounding boxes* touch or overlap without the *triangles* actually overlapping.
+Confirmed: a naive bbox-only count reported 273 of 576 false "overlapping" faces on
+`tests/fixtures/fox.glb` (a clean, real character UV map) and 33/80 on its eye mesh -- close to
+half the mesh, useless as a signal. Exact 2D triangle-triangle overlap (edge-crossing tests plus
+point-in-triangle containment) on the bbox-prefiltered candidates reads the correct 0/0.
+Also: the "skip pairs that share a UV vertex, they're just adjacent" filter must only exclude a
+shared *edge* (1-2 shared vertices) -- excluding on *any* shared vertex incorrectly waves through
+a fully duplicated/stacked UV island (all 3 vertices coincide, the most severe overlap there is)
+as "adjacent" and misses it completely; confirmed both ways on a synthetic stacked-UV fixture (0
+detected with the bug, the correct 12 once fixed).
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in
