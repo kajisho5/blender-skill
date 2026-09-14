@@ -29,6 +29,7 @@ UNWEIGHTED_VERTEX_FIXTURE = ROOT / "tests" / "fixtures" / "unweighted_vertex_cub
 MULTI_MATERIAL_FIXTURE = ROOT / "tests" / "fixtures" / "multi_material_cube.glb"
 MISCONFIGURED_TRANSPARENCY_FIXTURE = ROOT / "tests" / "fixtures" / "misconfigured_transparency.blend"
 DRACO_FIXTURE = ROOT / "tests" / "fixtures" / "box_draco.glb"
+DUPLICATE_MESH_FIXTURE = ROOT / "tests" / "fixtures" / "duplicate_mesh_scene.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -342,6 +343,33 @@ class TestToolchain(unittest.TestCase):
         proc = run("info.py", str(VERTEX_COLORS_FIXTURE), "--json")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIsNone(json.loads(proc.stdout)["gltf_extensions"])
+
+    def test_info_detects_already_instanced_and_duplicate_mesh_candidates(self):
+        # duplicate_mesh_scene.blend: CubeA and CubeB are a linked duplicate (literally the same
+        # Mesh datablock -- already properly instanced); CubeC is an independently-created cube
+        # of the same size (separate datablock, identical geometry -- a real "could share one
+        # datablock" candidate); SphereD is genuinely different geometry and must appear in
+        # neither group.
+        proc = run("info.py", str(DUPLICATE_MESH_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        instancing = data["instancing"]
+        self.assertEqual(len(instancing["already_instanced"]), 1)
+        self.assertEqual(set(instancing["already_instanced"][0]["objects"]), {"CubeA", "CubeB"})
+        self.assertEqual(len(instancing["duplicate_mesh_candidates"]), 1)
+        candidate = instancing["duplicate_mesh_candidates"][0]
+        self.assertEqual(set(candidate["objects"]), {"CubeA", "CubeC"})
+        self.assertEqual(candidate["vertices"], 8)
+        self.assertEqual(candidate["triangles"], 12)
+        self.assertTrue(any("could share one datablock" in w for w in data["warnings"]))
+
+    def test_info_reports_no_instancing_data_on_plain_fixtures(self):
+        for fixture in (FIXTURE, ROOT / "tests" / "fixtures" / "fox.glb"):
+            proc = run("info.py", str(fixture), "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            instancing = json.loads(proc.stdout)["instancing"]
+            self.assertEqual(instancing["already_instanced"], [])
+            self.assertEqual(instancing["duplicate_mesh_candidates"], [])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

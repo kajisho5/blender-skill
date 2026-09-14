@@ -523,6 +523,64 @@ def _lod_suggestions(total_triangles):
     return out
 
 
+def _mesh_signature(obj):
+    """A rotation/translation-invariant, order-independent fingerprint of a mesh's local
+    geometry (vertex count, triangle count, surface area, volume, sorted local bounding-box
+    dimensions) -- strong enough that two genuinely different meshes matching all five by
+    coincidence is vanishingly unlikely, without needing an exact vertex-by-vertex identity
+    check. Used to find objects on *different* Mesh datablocks that are nevertheless
+    geometrically identical, i.e. duplicated instead of shared. Bounding-box dimensions come
+    from the mesh's own local-space vertices, not `obj.dimensions` (world-space, includes each
+    object's own scale) -- two instances of the same shape used at different scales should still
+    match.
+    """
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    vert_count = len(bm.verts)
+    tri_count = len(bm.faces)
+    area = round(sum(f.calc_area() for f in bm.faces), 4)
+    volume = round(bm.calc_volume(signed=False), 4) if bm.faces else 0.0
+    bm.free()
+    xs = [v.co.x for v in obj.data.vertices]
+    ys = [v.co.y for v in obj.data.vertices]
+    zs = [v.co.z for v in obj.data.vertices]
+    dims = ((max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) if xs else (0.0, 0.0, 0.0))
+    return (vert_count, tri_count, area, volume, tuple(sorted(round(d, 4) for d in dims)))
+
+
+def _instancing_report(mesh_objs):
+    """Two things worth telling an agent about mesh reuse:
+
+    - already_instanced: objects that already share one Mesh datablock -- informational, this is
+      the efficient/correct state, not a defect.
+    - duplicate_mesh_candidates: objects on *separate* datablocks whose geometry matches by
+      `_mesh_signature` -- these could be converted to share one datablock (reassigning
+      `obj.data`), saving memory and enabling GPU instancing. Not fixed automatically: merging
+      datablocks can affect anything that depends on per-datablock identity (vertex colors used
+      differently per "instance", per-mesh custom properties), so this is a suggestion, not an
+      automatic operation.
+    """
+    by_data = {}
+    for o in mesh_objs:
+        by_data.setdefault(o.data, []).append(o.name)
+    already_instanced = [{"objects": names} for names in by_data.values() if len(names) > 1]
+
+    by_signature = {}
+    for data, names in by_data.items():
+        obj = next(o for o in mesh_objs if o.data is data)
+        by_signature.setdefault(_mesh_signature(obj), []).append(names[0])
+    duplicate_mesh_candidates = [
+        {"objects": names, "vertices": sig[0], "triangles": sig[1]}
+        for sig, names in by_signature.items() if len(names) > 1
+    ]
+
+    return {
+        "already_instanced": already_instanced,
+        "duplicate_mesh_candidates": duplicate_mesh_candidates,
+    }
+
+
 def _armatures():
     out = []
     for obj in bpy.data.objects:
@@ -623,6 +681,13 @@ def run(args):
                     f"{stats['name']}: ~{uv['overlapping_faces_approx']} face pair(s) have overlapping UVs "
                     "(approximate -- may be deliberate, e.g. mirrored islands; worth a manual look, no automatic fix)"
                 )
+    instancing = _instancing_report(mesh_objs)
+    for group in instancing["duplicate_mesh_candidates"]:
+        warnings.append(
+            f"{', '.join(group['objects'])}: identical geometry on separate mesh datablocks "
+            f"({group['vertices']} vertices, {group['triangles']} triangles each) -- could share "
+            "one datablock to save memory and enable GPU instancing, not done automatically"
+        )
 
     return {
         "file": path,
@@ -637,6 +702,7 @@ def run(args):
             "lod_suggestions": _lod_suggestions(total_tris),
             "draw_calls_estimate": sum(stats["draw_calls_estimate"] for stats in per_object),
         },
+        "instancing": instancing,
         "materials": {
             "count": len(materials),
             "names": [m.name for m in materials],
