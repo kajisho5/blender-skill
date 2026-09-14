@@ -305,6 +305,35 @@ engine) still draws it, just with a default/fallback material, so it's still one
 `_draw_call_estimate` relies on this: `len({p.material_index for p in obj.data.polygons})` reads
 1 for this mesh, correctly, with no special-casing needed for the zero-material-slots case.
 
+## Blender 4.2's EEVEE Next dropped OPAQUE/CLIP from the real transparency-mode property
+
+`Material.blend_method`'s own `bl_rna` enum still lists all 4 legacy values (`OPAQUE`, `CLIP`,
+`HASHED`, `BLEND`) on real 4.2.23/4.5.13/5.2.1 -- but assigning `'OPAQUE'` or `'CLIP'` to it
+silently no-ops (the property keeps whatever value it already had); only `'HASHED'` and
+`'BLEND'` actually take. The real, current, authoritative property is `Material.
+surface_render_method`, a 2-value enum (`DITHERED`, `BLENDED`) that EEVEE Next introduced to
+replace the old 4-mode system -- `blend_method` reads back as a compatibility view onto it
+(`DITHERED` -> `HASHED`, `BLENDED` -> `BLEND`) but is not itself settable to the two modes it no
+longer has. Confirmed identical on all three CI-tested Blender versions. This directly affects
+RM-013 (originally scoped as "alpha blend vs clip"): that literal CLIP mode doesn't exist as a
+settable state on any currently-supported Blender version, so `info.py`'s transparency-mode
+check reads `surface_render_method` directly rather than `blend_method`, and is framed as
+"real blending (BLENDED) vs. dithered (DITHERED)" -- the same underlying artist mistake
+(a binary alpha mask needlessly costing real, sorting-order-fragile alpha blending), just
+tracked through the property that's actually real today. Same "bl_rna enum isn't authoritative
+for real behavior" lesson this project has hit before (the FFMPEG format enum, `Attribute.
+is_internal`), not a new kind of surprise.
+
+## An image's `.pixels` needs the lazy-load trigger before checking transparency, too
+
+`_alpha_is_binary_mask` (RM-013) hit the same lazy-load gotcha this file already documents for
+`look.py`/`bake.py`: on a freshly-loaded `.blend`, a packed/embedded image's `has_data` reads
+`False` and `size` reads `(0, 0)` until `.pixels` is actually touched once. Checking `has_data`
+*before* reading `.pixels` silently skipped every material's alpha texture (`transparency_
+issues` read `[]` even on `misconfigured_transparency.blend`'s deliberately-broken fixture) --
+fixed by reading `image.pixels[:]` first (forcing the decode) and only then checking `has_data`/
+`size`.
+
 ## Blender's bundled Python includes numpy
 
 Not stdlib in the usual sense, but it ships with Blender itself (confirmed: `numpy 1.24.3` in

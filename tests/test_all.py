@@ -27,6 +27,7 @@ VERTEX_COLORS_FIXTURE = ROOT / "tests" / "fixtures" / "vertex_colors_cube.blend"
 ROOT_MOTION_FIXTURE = ROOT / "tests" / "fixtures" / "root_motion_rig.blend"
 UNWEIGHTED_VERTEX_FIXTURE = ROOT / "tests" / "fixtures" / "unweighted_vertex_cube.blend"
 MULTI_MATERIAL_FIXTURE = ROOT / "tests" / "fixtures" / "multi_material_cube.glb"
+MISCONFIGURED_TRANSPARENCY_FIXTURE = ROOT / "tests" / "fixtures" / "misconfigured_transparency.blend"
 sys.path.insert(0, str(ROOT / "scripts"))
 import _run  # noqa: E402
 
@@ -298,6 +299,25 @@ class TestToolchain(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual(data["meshes"]["per_object"][0]["draw_calls_estimate"], 2)
         self.assertEqual(data["meshes"]["draw_calls_estimate"], 2)
+
+    def test_info_detects_misconfigured_transparent_material(self):
+        # misconfigured_transparency.blend: a plane material with a hard binary-alpha mask
+        # texture (leaf cutout, values only 0.0/1.0) but surface_render_method left at BLENDED
+        # (real alpha blending) instead of DITHERED -- a real "should be a cheap cutout, not an
+        # expensive/sorting-order-fragile real blend" defect.
+        proc = run("info.py", str(MISCONFIGURED_TRANSPARENCY_FIXTURE), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        issues = data["materials"]["transparency_issues"]
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["material"], "FoliageMisconfigured")
+        self.assertTrue(any("hard mask" in w for w in data["warnings"]))
+
+    def test_info_reports_no_transparency_issues_on_plain_fixtures(self):
+        for fixture in (FIXTURE, ROOT / "tests" / "fixtures" / "fox.glb"):
+            proc = run("info.py", str(fixture), "--json")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(json.loads(proc.stdout)["materials"]["transparency_issues"], [])
 
     def test_convert_and_verify_roundtrip(self):
         # fbx keeps the same shared-vertex topology as glb, so this roundtrip should match

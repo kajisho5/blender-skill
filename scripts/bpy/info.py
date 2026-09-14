@@ -331,6 +331,83 @@ def _mesh_stats(obj):
     }
 
 
+def _find_alpha_image(mat):
+    """Walk back from a material's Principled BSDF Alpha input to a directly-connected Image
+    Texture node, if any. Only follows that one direct link -- doesn't attempt full node-graph
+    evaluation for a more elaborate procedural/mixed alpha setup, only the common single-texture
+    case.
+    """
+    if not mat.use_nodes or not mat.node_tree:
+        return None
+    bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if not bsdf:
+        return None
+    alpha_input = bsdf.inputs.get("Alpha")
+    if not alpha_input or not alpha_input.is_linked:
+        return None
+    node = alpha_input.links[0].from_node
+    return node.image if node.type == "TEX_IMAGE" else None
+
+
+def _alpha_is_binary_mask(image):
+    """True if this image's alpha channel reads as a hard mask (values clustered at 0.0/1.0,
+    like a foliage/cutout texture) rather than a smooth gradient (glass, cloth, a frosted
+    panel). None if there's no alpha channel at all, or no pixel data to sample.
+    """
+    if not image:
+        return None
+    pixels = image.pixels[:]  # forces the lazy load -- has_data/size are stale until this (see
+                               # references/pitfalls.md's "has_data is False until you touch
+                               # .pixels" entry)
+    if not image.has_data or image.channels < 4:
+        return None
+    w, h = image.size
+    if w == 0 or h == 0:
+        return None
+    channels = image.channels
+    total = mid = 0
+    for i in range(0, len(pixels), channels):
+        a = pixels[i + 3]
+        total += 1
+        if 0.05 < a < 0.95:
+            mid += 1
+    return (mid / total) < 0.02 if total else None
+
+
+def _transparency_issues(materials):
+    """Materials whose alpha texture is a hard/binary mask but use real alpha blending
+    (surface_render_method == 'BLENDED') instead of the cheaper, sorting-artifact-free dithered
+    mode ('DITHERED') -- the real, current-Blender-version equivalent of the classic "foliage
+    material mistakenly set to Blend instead of Clip" mistake.
+
+    Blender 4.2's EEVEE Next replaced the old 4-mode Material.blend_method (OPAQUE/CLIP/HASHED/
+    BLEND) with a 2-mode Material.surface_render_method (DITHERED/BLENDED) -- confirmed on real
+    4.2.23, 4.5.13 and 5.2.1 that blend_method's own bl_rna enum still lists all 4 legacy values,
+    but assigning 'OPAQUE' or 'CLIP' to it silently no-ops (the property keeps its previous
+    value); surface_render_method is the real, current, authoritative property, so this checks
+    that one directly rather than trusting blend_method's enum listing. See
+    references/pitfalls.md -- this is the same "bl_rna enum isn't authoritative for real
+    behavior" lesson this project has hit before, not a new kind of surprise.
+    """
+    issues = []
+    for mat in materials:
+        image = _find_alpha_image(mat)
+        if image is None:
+            continue
+        is_binary = _alpha_is_binary_mask(image)
+        if is_binary and mat.surface_render_method == "BLENDED":
+            issues.append({
+                "material": mat.name,
+                "issue": (
+                    "alpha texture looks like a hard mask, but this material uses real alpha "
+                    "blending (BLENDED) -- try surface_render_method = 'DITHERED' instead "
+                    "(cheaper, avoids transparency sorting-order artifacts, no visual downside "
+                    "for a mask that's already just 0/1)"
+                ),
+            })
+    return issues
+
+
 def _texture_info():
     textures = []
     for img in bpy.data.images:
@@ -505,6 +582,9 @@ def run(args):
     missing_tex = [t["name"] for t in _texture_info() if t["missing"]]
     if missing_tex:
         warnings.append(f"missing texture file(s): {', '.join(missing_tex)}")
+    transparency_issues = _transparency_issues(materials)
+    for issue in transparency_issues:
+        warnings.append(f"material '{issue['material']}': {issue['issue']}")
     for stats in per_object:
         if stats["non_manifold_edges"]:
             fix = ("try: optimize.py <file> -o <out> --fill-holes" if stats["boundary_edges"]
@@ -557,7 +637,11 @@ def run(args):
             "lod_suggestions": _lod_suggestions(total_tris),
             "draw_calls_estimate": sum(stats["draw_calls_estimate"] for stats in per_object),
         },
-        "materials": {"count": len(materials), "names": [m.name for m in materials]},
+        "materials": {
+            "count": len(materials),
+            "names": [m.name for m in materials],
+            "transparency_issues": transparency_issues,
+        },
         "textures": _texture_info(),
         "armatures": _armatures(),
         "animations": _animations(scene),

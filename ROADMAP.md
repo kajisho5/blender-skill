@@ -23,7 +23,7 @@ what v0.1.0 actually does.
 | RM-010 | inspect | LOD候補の自動提案（三角数から推奨比率） | done | #11 |
 | RM-011 | inspect | ポリカウント予算チェック（ターゲット別） | done | |
 | RM-012 | inspect | ドローコール見積り（マテリアル数×オブジェクト数） | done | #12 |
-| RM-013 | inspect | 透明マテリアルの誤設定検出（alpha blend vs clip） | planned | #13 |
+| RM-013 | inspect | 透明マテリアルの誤設定検出（alpha blend vs clip） | done | #13 |
 | RM-014 | inspect | glTF拡張の使用一覧（KHR_*）と対応表 | planned | #14 |
 | RM-015 | inspect | 重複メッシュ/インスタンス化可能なオブジェクト検出 | planned | #15 |
 | RM-016 | convert | USD/USDZ 出力の iOS Quick Look 互換性検証 | planned | #16 |
