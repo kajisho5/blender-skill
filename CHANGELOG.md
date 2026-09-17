@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.21.0...blender-skill-v0.22.0) (2026-09-17)
+
+
+### Features
+
+* **optimize:** animation keyframe decimation with a tolerance (RM-035) ([#143](https://github.com/kajisho5/blender-skill/issues/143)) ([9500850](https://github.com/kajisho5/blender-skill/commit/9500850bb2a7e1e6bc1188d381ad5572c5c76bc9))
+
 ## [0.21.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.20.0...blender-skill-v0.21.0) (2026-09-17)
 
 
