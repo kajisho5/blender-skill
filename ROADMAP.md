@@ -47,7 +47,7 @@ what v0.1.0 actually does.
 | RM-034 | optimize | 未使用ボーン削除・ボーン数上限（モバイル向け） | done | #27 |
 | RM-035 | optimize | アニメーションキーフレーム間引き（許容誤差指定） | done | #28 |
 | RM-036 | optimize | シェイプキー削減 | done | #29 |
-| RM-037 | optimize | インスタンス化（同一メッシュを共有） | planned | #30 |
+| RM-037 | optimize | インスタンス化（同一メッシュを共有） | done | #30 |
 | RM-038 | optimize | マテリアル統合（同一パラメータをマージ） | planned | #31 |
 | RM-039 | optimize | `--target-*` プリセット拡充：sketchfab, vrchat, roblox, gltf-viewer, quicklook | planned | #32 |
 | RM-040 | optimize | 最適化前後の視覚差分スコア（レンダ画像のPSNR/SSIMを純Pythonで） | planned | #33 |

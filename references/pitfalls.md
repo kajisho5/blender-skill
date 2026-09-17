@@ -714,3 +714,71 @@ whose `Key.use_relative` is `False` entirely -- verified on a purpose-built fixt
 (`absolute_shape_key_rig.blend`: Basis, a geometrically-identical-to-Basis `StateA`, and a real
 `StateB`, with `use_relative = False`) two ways: with the guard, nothing is removed; reverting
 just the guard reproduces the bug exactly, removing `StateA`.
+
+## Sharing mesh data means sharing more than geometry: shape-key state and vertex weights too
+
+`--instance-duplicate-meshes` (RM-037) merges mesh objects onto one shared datablock when
+proven fully identical -- but "fully identical geometry" isn't the same question as "safe to
+share data". Two real Blender data-model facts made this feature need to *exclude* certain
+objects outright, not just check them for equality:
+
+- A shape key's *value* (the blend-weight slider) is a property of the `ShapeKey`, which lives
+  in the mesh's shared `Key` datablock -- not the object. Two objects that share one mesh
+  therefore share one Key datablock, and so share the *same current shape-key values* too. Two
+  geometrically-identical props that happen to have their shape keys posed differently right now
+  would have that difference silently erased if merged.
+- A vertex's bone-weight assignments (`MeshVertex.groups`) live on the mesh's own vertex data,
+  not the object -- only the *definitions* (`Object.vertex_groups`, the named groups themselves)
+  are per-object. Two skinned objects sharing one mesh would be forced to carry identical weight
+  assignments even if their `vertex_groups` lists differ.
+
+Both are excluded from instancing candidacy entirely (`_mesh_is_animatable`), regardless of what
+a geometry-equality check would otherwise conclude, rather than trying to detect "would this
+particular merge actually change anything" case by case.
+
+Separately: info.py's own `duplicate_mesh_candidates` (RM-015) uses a deliberately loose,
+rotation/translation-invariant fingerprint (vertex/triangle count, area, volume, sorted bbox
+dims) appropriate for a human-reviewed *suggestion* -- it's not safe grounds for an *automatic*
+merge, since two meshes can match all five of those numbers while differing in UVs, vertex
+colors, or which Material datablocks they reference. `_mesh_fully_identical` checks real
+equality within a tight 1e-6 floating-point tolerance -- not a lossy geometric fingerprint, but
+not literal bit-for-bit either, since two meshes built the same way can still differ in the last
+bit or two (indexed vertex positions, face topology and per-face material_index/use_smooth,
+sharp-face/sharp-edge marks, every UV layer's name/active-render flag and coordinates, every
+color attribute's name/values and the mesh's render-fallback selection, and the same Material
+datablock references) instead. Verified on a purpose-built fixture
+(`instancing_rig.blend`): two cubes matching the loose signature exactly, differing only by a
+shifted UV layer, are correctly left unmerged -- the loose fingerprint alone would have flagged
+them as a merge candidate.
+
+## A shared mesh datablock can have one animatable user and one that isn't -- filter datablocks, not just objects
+
+`_instance_duplicate_meshes`'s first version filtered *objects* by `_mesh_is_animatable()` before
+grouping by `obj.data`: `[o for o in mesh_objs if not _mesh_is_animatable(o)]`, then
+`by_data.setdefault(o.data, []).append(o)`. That's wrong when a datablock already has *more than
+one* user, which is a real, normal Blender scenario (a linked duplicate, or a shape-keyed/
+Armature-modified copy added to only one of two objects that started out sharing data): the
+excluded animatable object's own reference to that datablock never showed up in `by_data` at
+all, so if the datablock got picked as a *non-canonical* duplicate in some other identical-mesh
+group, `bpy.data.meshes.remove()` would free a datablock the excluded object was still silently
+pointing at. Caught by review. Fixed by grouping *every* mesh object by its datablock first, then
+dropping a datablock from candidacy entirely if *any* of its users fails `_mesh_is_animatable` --
+one animatable user is enough to make the whole shared datablock unsafe to touch, even if its
+other users would have been individually eligible.
+
+## A shared Material's node tree can look up a UV layer or color attribute by name, not just position
+
+`_mesh_fully_identical` originally compared UV layers and color attributes by matching *position*
+in each mesh's list and comparing only their coordinate/color values -- not their names, active-
+render flags, or (for color attributes) the mesh's own render-fallback selection
+(`color_attributes.default_color_name`/`render_color_index`). That's not enough: a material's own
+node tree can reference a specific layer by name (`ShaderNodeUVMap.uv_map`,
+`ShaderNodeVertexColor.layer_name`), and an empty name falls back to whichever layer the *mesh*
+currently marks as its active-render UV layer or default color attribute. Two meshes could have
+identical UV/color values under different layer names, or the same names but a different
+render-fallback selection, and still match every check that only looked at values -- yet the
+exact same shared Material could sample different data (or nothing) for each once merged. Caught
+by review; fixed by also comparing each UV layer's `name`/`active_render` and each color
+attribute's `name`, plus the mesh-level `default_color_name`/`render_color_index` fallback
+(display-only `active_color_index` deliberately excluded -- it affects only what's shown in the
+UI's active-attribute indicator, nothing about how a material samples the mesh).

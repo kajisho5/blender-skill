@@ -643,6 +643,159 @@ def _remove_unused_shape_keys(mesh_objs) -> list:
     return removed
 
 
+def _mesh_is_animatable(obj) -> bool:
+    """True if instancing this object's mesh data with another's could silently change
+    animated/deformed behavior, regardless of what the equality check below would otherwise
+    conclude: shape key *values* live on the shared Key datablock (so merging two objects with
+    shape keys would collapse their potentially-different current blend state into one shared
+    state), and per-vertex bone weights live on the shared mesh's own vertex data, not the
+    object (so merging two skinned objects would force them to share identical weight
+    assignments). Both are real Blender data-model facts, not assumptions -- excluded from
+    instancing candidacy entirely.
+    """
+    if obj.data.shape_keys:
+        return True
+    return any(m.type == "ARMATURE" for m in obj.modifiers)
+
+
+def _bool_attr_values(mesh, name: str, count: int) -> list:
+    """A per-element boolean attribute (e.g. 'sharp_face'/'sharp_edge') exists only once some
+    element has a non-default value -- absent means every element is still the default (False).
+    Reading it this way, rather than requiring the attribute to exist, avoids two meshes that are
+    genuinely equivalent (all-smooth, no sharp marks on either) differing only in whether Blender
+    happened to have created the (all-False) attribute at all.
+    """
+    attr = mesh.attributes.get(name)
+    if attr is None:
+        return [False] * count
+    return [bool(item.value) for item in attr.data]
+
+
+def _mesh_fully_identical(mesh_a, mesh_b) -> bool:
+    """True mesh-data equality -- not info.py's own duplicate-mesh signature (a rotation/
+    translation-invariant fingerprint deliberately loose enough for a human-reviewed suggestion,
+    not safe grounds for an automatic merge). Checks vertex count and every vertex's exact
+    position (index-for-index, within a 1e-6 floating-point tolerance -- not byte-for-byte, since
+    two meshes built the same way can still differ in the last bit or two), face topology
+    (identical polygon count, the same vertex-index sequence per face and the same winding
+    order, the same material_index and use_smooth per face), sharp-face/sharp-edge marks and
+    whether either has custom split normals (if either does, never merged at all -- comparing
+    Blender's real per-corner split-normal solve exactly enough to guarantee identical shading is
+    out of scope, and guessing risks a visible seam/shading change post-merge, the same reasoning
+    RM-035 applied to BEZIER-interpolated keyframes), every UV layer's name/active-render flag
+    and coordinates, every color attribute's name/values and the mesh's effective color-attribute
+    render fallback (default_color_name/render_color_index -- not the display-only
+    active_color_index, which affects nothing about how a material samples it), and that both
+    meshes reference the exact same Material datablocks in the same slot order -- not materials
+    that merely look the same, literally the same datablocks. A material's own node tree can look
+    up a UV layer or color attribute by name (e.g. ShaderNodeUVMap.uv_map), so two meshes with
+    identical UV/color *values* under different layer names or a different render-fallback
+    selection could still make the same shared material sample different data for each -- caught
+    by review; see references/pitfalls.md.
+    """
+    if len(mesh_a.vertices) != len(mesh_b.vertices) or len(mesh_a.polygons) != len(mesh_b.polygons):
+        return False
+    if len(mesh_a.edges) != len(mesh_b.edges):
+        return False
+    if list(mesh_a.materials) != list(mesh_b.materials):
+        return False
+    if mesh_a.has_custom_normals or mesh_b.has_custom_normals:
+        return False
+    for va, vb in zip(mesh_a.vertices, mesh_b.vertices):
+        if (va.co - vb.co).length > 1e-6:
+            return False
+    for fa, fb in zip(mesh_a.polygons, mesh_b.polygons):
+        if list(fa.vertices) != list(fb.vertices):
+            return False
+        if fa.material_index != fb.material_index or fa.use_smooth != fb.use_smooth:
+            return False
+    if _bool_attr_values(mesh_a, "sharp_face", len(mesh_a.polygons)) != _bool_attr_values(mesh_b, "sharp_face", len(mesh_b.polygons)):
+        return False
+    if _bool_attr_values(mesh_a, "sharp_edge", len(mesh_a.edges)) != _bool_attr_values(mesh_b, "sharp_edge", len(mesh_b.edges)):
+        return False
+    if len(mesh_a.uv_layers) != len(mesh_b.uv_layers):
+        return False
+    for la, lb in zip(mesh_a.uv_layers, mesh_b.uv_layers):
+        if la.name != lb.name or la.active_render != lb.active_render:
+            return False
+        for da, db in zip(la.data, lb.data):
+            if (da.uv - db.uv).length > 1e-6:
+                return False
+    if len(mesh_a.color_attributes) != len(mesh_b.color_attributes):
+        return False
+    if mesh_a.color_attributes.default_color_name != mesh_b.color_attributes.default_color_name:
+        return False
+    if mesh_a.color_attributes.render_color_index != mesh_b.color_attributes.render_color_index:
+        return False
+    for ca, cb in zip(mesh_a.color_attributes, mesh_b.color_attributes):
+        if ca.name != cb.name or ca.domain != cb.domain or ca.data_type != cb.data_type:
+            return False
+        for da, db in zip(ca.data, cb.data):
+            if tuple(da.color) != tuple(db.color):
+                return False
+    return True
+
+
+def _instance_duplicate_meshes(mesh_objs) -> list:
+    """Merges every group of mesh objects on *separate* datablocks that are fully identical
+    (_mesh_fully_identical) onto one shared datablock, removing the now-orphaned duplicates --
+    the automatic counterpart to info.py's own duplicate_mesh_candidates suggestion, safe to run
+    unattended because it only merges what's proven identical, not just similarly shaped.
+    Objects already sharing one datablock are never touched (already efficient); a datablock is
+    excluded from candidacy *entirely* if ANY object using it fails _mesh_is_animatable -- a
+    datablock can be shared by several objects (e.g. a linked duplicate), and one shape-keyed/
+    skinned user is enough to make the whole shared datablock unsafe to reassign or remove, even
+    if some of its other users would individually have been eligible (caught by review: grouping
+    by pre-filtered "eligible" objects only, before grouping by datablock, could otherwise still
+    remove a datablock a non-eligible object was quietly still pointing at). Buckets candidates
+    by (vertex count, polygon count) first so the expensive exact-equality check only ever runs
+    within a group of comparably-sized meshes, not every pair in the file.
+    """
+    by_data = {}
+    for o in mesh_objs:
+        by_data.setdefault(o.data, []).append(o)
+    by_data = {data: objs for data, objs in by_data.items() if not any(_mesh_is_animatable(o) for o in objs)}
+
+    buckets = {}
+    for data, objs in by_data.items():
+        key = (len(data.vertices), len(data.polygons))
+        buckets.setdefault(key, []).append((data, objs))
+
+    merged = []
+    for bucket in buckets.values():
+        if len(bucket) < 2:
+            continue
+        unassigned = list(bucket)
+        while unassigned:
+            data, objs = unassigned.pop(0)
+            group = [(data, objs)]
+            remaining = []
+            for other_data, other_objs in unassigned:
+                if _mesh_fully_identical(data, other_data):
+                    group.append((other_data, other_objs))
+                else:
+                    remaining.append((other_data, other_objs))
+            unassigned = remaining
+            if len(group) < 2:
+                continue
+            canonical_data, canonical_objs = group[0]
+            merged_names = []
+            removed_data_names = []
+            for dup_data, dup_objs in group[1:]:
+                for o in dup_objs:
+                    o.data = canonical_data
+                    merged_names.append(o.name)
+                removed_data_names.append(dup_data.name)
+                bpy.data.meshes.remove(dup_data)
+            merged.append({
+                "canonical_mesh": canonical_data.name,
+                "canonical_objects": [o.name for o in canonical_objs],
+                "merged_objects": merged_names,
+                "datablocks_removed": removed_data_names,
+            })
+    return merged
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -741,6 +894,10 @@ def run(args):
     if args.get("remove_unused_shape_keys"):
         shape_keys_removed = _remove_unused_shape_keys(mesh_objs)
 
+    meshes_instanced = []
+    if args.get("instance_duplicate_meshes"):
+        meshes_instanced = _instance_duplicate_meshes(mesh_objs)
+
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
@@ -770,6 +927,7 @@ def run(args):
         "keyframe_points_after": keyframes_decimated["keyframe_points_after"],
         "keyframes_decimated_by_action": keyframes_decimated["by_action"],
         "shape_keys_removed": shape_keys_removed,
+        "meshes_instanced": meshes_instanced,
         "output_path": args["output"],
         "warnings": warnings,
     }
