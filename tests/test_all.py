@@ -1259,6 +1259,25 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(data["triangles_before"], 37600)
         self.assertEqual(data["triangles_after"], 37600)
 
+    def test_optimize_target_vrchat_recalculates_aggregate_budget_after_fill_holes(self):
+        # vrchat_boundary_hole.blend: a sphere with one real hole, 69,960 triangles as imported
+        # (just under VRChat's 70,000 aggregate budget -- an "aggregate" ratio computed from this
+        # pre-fill-holes count alone would conclude no decimation is needed at all). --fill-holes
+        # then adds enough geometry back to push the real total to 70,632, over budget -- a
+        # decision already made from the stale pre-fill-holes count never revisits that. Reproduced
+        # directly: reverting just this fix (computing the aggregate ratio from before_tris instead
+        # of the post-topology-change count) exports 70,632 triangles, over budget.
+        # (info.py's own verification is skipped here -- its self-intersection/thickness checks
+        # are prohibitively slow on a mesh this size, confirmed independently: over two minutes
+        # for a single run. optimize.py's own triangles_after is a directly measured count from
+        # the same real Blender data, not a guess, so it alone is sufficient here.)
+        out = self.out / "vrchat_boundary_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "vrchat_boundary_hole.blend"), "-o", str(out), "--target-vrchat", "--fill-holes", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_before"], 69960)
+        self.assertLessEqual(data["triangles_after"], 70_000)
+
     def test_optimize_target_triangle_budget_is_a_noop_when_already_within_budget(self):
         # The same 20,480-triangle fixture is well under --target-vrchat's 70,000 and
         # --target-quicklook's 100,000 triangle_budget -- neither should decimate anything.

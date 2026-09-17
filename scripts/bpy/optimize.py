@@ -1084,31 +1084,33 @@ def run(args):
     before_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
 
     # A preset's triangle_budget is an *absolute* count a real platform publishes (see PRESETS) --
-    # turned into an actual ratio here, against this file's own real pre-decimate triangle count,
-    # rather than shipped as a fixed fraction that couldn't guarantee compliance for an arbitrary
-    # input size. An explicit --decimate-ratio always wins over it, same as it already wins over a
-    # preset's own fixed decimate_ratio; already-within-budget is a no-op. "aggregate" scope (the
-    # default) computes one shared ratio from the whole file's combined triangle count, applied to
-    # every mesh object the same way -- correct for a platform that budgets a whole avatar/scene,
-    # not a per-part limit (VRChat, Quick Look). "per_mesh" scope instead clamps each mesh object
-    # independently against the same absolute number, inside the loop below, using that object's
-    # own triangle count -- correct for a platform whose real limit is explicitly per individual
-    # mesh (Roblox): an aggregate ratio here would needlessly decimate two already-compliant
-    # meshes just because their *sum* crossed the budget, a case the real per-mesh limit never
-    # actually restricts (caught by review).
+    # turned into an actual ratio further below, against this file's own real triangle count at
+    # decimation time, rather than shipped as a fixed fraction that couldn't guarantee compliance
+    # for an arbitrary input size. An explicit --decimate-ratio always wins over it, same as it
+    # already wins over a preset's own fixed decimate_ratio; already-within-budget is a no-op.
+    # "aggregate" scope (the default) computes one shared ratio from the whole file's combined
+    # triangle count, applied to every mesh object the same way -- correct for a platform that
+    # budgets a whole avatar/scene, not a per-part limit (VRChat, Quick Look). "per_mesh" scope
+    # instead clamps each mesh object independently against the same absolute number, using that
+    # object's own triangle count -- correct for a platform whose real limit is explicitly per
+    # individual mesh (Roblox): an aggregate ratio here would needlessly decimate two already-
+    # compliant meshes just because their *sum* crossed the budget, a case the real per-mesh limit
+    # never actually restricts (caught by review).
     triangle_budget = (preset or {}).get("triangle_budget")
     triangle_budget_scope = (preset or {}).get("triangle_budget_scope", "aggregate")
-    if (
-        args.get("decimate_ratio") is None and triangle_budget
-        and triangle_budget_scope == "aggregate" and before_tris > triangle_budget
-    ):
-        decimate_ratio = triangle_budget / before_tris
 
     welded_total = 0
     holes_filled_total = 0
     scales_fixed_total = 0
     points_thinned_total = 0
     warnings = []
+    # Topology-changing operations (--fill-holes adds real geometry; weld/triangulate can also
+    # change the real triangle count) run for every mesh object *before* any triangle_budget ratio
+    # is computed or applied -- a ratio computed from the pre-topology-change count could silently
+    # under-decimate once --fill-holes adds new triangles afterward, exceeding the platform's real
+    # budget despite this feature's own guarantee. Reproduced directly: a triangle_budget exactly
+    # equal to a hole-containing mesh's pre-fill-holes count (so no decimation looked necessary)
+    # still exported over budget once --fill-holes added its new face. Caught by review.
     for o in mesh_objs:
         point_thin_voxel = args.get("point_thin_voxel")
         if point_thin_voxel and point_thin_voxel > 0:
@@ -1128,6 +1130,11 @@ def run(args):
             o, weld=bool(args.get("weld_doubles")), triangulate=bool(args.get("triangulate")),
             recalc_normals=bool(args.get("recalc_normals")),
         )
+
+    if args.get("decimate_ratio") is None and triangle_budget and triangle_budget_scope == "aggregate":
+        post_topology_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
+        decimate_ratio = triangle_budget / post_topology_tris if post_topology_tris > triangle_budget else None
+    for o in mesh_objs:
         obj_decimate_ratio = decimate_ratio
         if (
             args.get("decimate_ratio") is None and triangle_budget
