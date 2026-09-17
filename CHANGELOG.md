@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.23.0...blender-skill-v0.24.0) (2026-09-17)
+
+
+### Features
+
+* **optimize:** merge fully-identical duplicate meshes (RM-037) ([#147](https://github.com/kajisho5/blender-skill/issues/147)) ([a2b9b91](https://github.com/kajisho5/blender-skill/commit/a2b9b9166594f9cae6b08fa2f937e64dbd035081))
+
 ## [0.23.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.22.0...blender-skill-v0.23.0) (2026-09-17)
 
 
