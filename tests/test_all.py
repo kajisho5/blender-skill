@@ -1138,6 +1138,84 @@ class TestToolchain(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual(data["meshes_instanced"], [])
 
+    def test_optimize_merge_materials_merges_identical_node_graphs_only(self):
+        # materials_rig.blend: MatA/MatB/MatC are three independently-authored materials with
+        # byte-identical node graphs -- must merge onto one canonical datablock. MatD has the
+        # same graph shape but a different Base Color -- must not merge. MuteMatA is identical
+        # to the trio (so it merges too) but MuteMatB has its Principled BSDF muted, which
+        # changes what the graph actually renders -- must not merge with anything. NoNodesMatA/B
+        # (use_nodes=False, identical legacy diffuse_color) must merge; NoNodesMatC (different
+        # diffuse_color) must not.
+        out = self.out / "materials_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "materials_rig.blend"), "-o", str(out), "--merge-materials", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["materials_merged"]), 2)
+        by_canonical = {g["canonical_material"]: sorted(g["merged_materials"]) for g in data["materials_merged"]}
+        self.assertEqual(by_canonical["MatA"], ["MatB", "MatC", "MuteMatA"])
+        self.assertEqual(by_canonical["NoNodesMatA"], ["NoNodesMatB"])
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(set(info["materials"]["names"]), {"MatA", "MatD", "MuteMatB", "NoNodesMatA", "NoNodesMatC"})
+
+    def test_optimize_merge_materials_checks_image_datablock_identity_not_pixel_content(self):
+        # material_texture_rig.blend: TexMatA/TexMatB reference the exact same Image datablock
+        # via an Image Texture node -- must merge. TexMatC references a separately-created Image
+        # datablock with matching generation parameters (same pixel content, different identity)
+        # -- must not merge with A/B, since a merge here would make TexMatC's own object start
+        # sampling a texture it never actually referenced.
+        out = self.out / "material_texture_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "material_texture_rig.blend"), "-o", str(out), "--merge-materials", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["materials_merged"]), 1)
+        self.assertEqual(data["materials_merged"][0]["canonical_material"], "TexMatA")
+        self.assertEqual(data["materials_merged"][0]["merged_materials"], ["TexMatB"])
+
+    def test_optimize_merge_materials_reassigns_per_object_slot_overrides(self):
+        # material_objlink_rig.blend: ObjLinkA_obj/ObjLinkB_obj each carry a per-OBJECT material
+        # slot override (link == 'OBJECT') rather than the mesh data's own slot material, pointing
+        # at two independently-authored but structurally-identical materials. Reassigning only
+        # mesh.materials (as RM-037's own instancing does for mesh data) would miss this case
+        # entirely -- object.material_slots needs its own reassignment pass.
+        out = self.out / "material_objlink_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "material_objlink_rig.blend"), "-o", str(out), "--merge-materials", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["materials_merged"]), 1)
+        self.assertEqual(data["materials_merged"][0]["canonical_material"], "ObjLinkMatA")
+        self.assertEqual(data["materials_merged"][0]["merged_materials"], ["ObjLinkMatB"])
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertNotIn("ObjLinkMatB", info["materials"]["names"])
+
+    def test_optimize_merge_materials_reassigns_a_curve_objects_own_material_slot(self):
+        # material_curve_rig.blend: MeshObj (a mesh) and CurveObj (a Curve, not a Mesh) use two
+        # independently-authored but structurally-identical materials. A reassignment pass that
+        # only walked bpy.data.meshes (this feature's first version) would never touch
+        # CurveObj.data.materials -- Curve.materials is a real, separate material-slot list
+        # Blender gives every Curve/Text/MetaBall/GreasePencil/Volume datablock, not just Mesh --
+        # so bpy.data.materials.remove(dup) would have silently dropped the curve's material
+        # slot to None instead of reassigning it. Caught by review.
+        out = self.out / "material_curve_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "material_curve_rig.blend"), "-o", str(out), "--merge-materials", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["materials_merged"]), 1)
+        canonical = data["materials_merged"][0]["canonical_material"]
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(info["materials"]["names"], [canonical])
+
+    def test_optimize_merge_materials_is_idempotent(self):
+        out1 = self.out / "materials_pass1.blend"
+        proc1 = run("optimize.py", str(ROOT / "tests" / "fixtures" / "materials_rig.blend"), "-o", str(out1), "--merge-materials", "--json")
+        self.assertEqual(proc1.returncode, 0, proc1.stderr)
+        out2 = self.out / "materials_pass2.blend"
+        proc2 = run("optimize.py", str(out1), "-o", str(out2), "--merge-materials", "--json")
+        self.assertEqual(proc2.returncode, 0, proc2.stderr)
+        self.assertEqual(json.loads(proc2.stdout)["materials_merged"], [])
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

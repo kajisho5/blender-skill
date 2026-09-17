@@ -796,6 +796,229 @@ def _instance_duplicate_meshes(mesh_objs) -> list:
     return merged
 
 
+_MATERIAL_IGNORED_PROPS = {
+    "rna_type", "name", "name_full", "node_tree", "original", "id_data", "library",
+    "library_weak_reference", "override_library", "preview", "users", "use_fake_user",
+    "is_embedded_data", "is_evaluated", "session_uid", "tag", "asset_data",
+}
+
+_NODE_IGNORED_PROPS = {
+    "rna_type", "name", "label", "select", "location", "location_absolute", "width",
+    "width_hidden", "height", "dimensions", "show_expanded", "show_options", "show_preview",
+    "show_texture", "hide", "parent", "internal_links", "color", "use_custom_color", "type",
+    "inputs", "outputs", "bl_idname", "bl_label", "bl_description", "bl_icon", "bl_static_type",
+    "bl_width_default", "bl_width_min", "bl_width_max", "bl_height_default", "bl_height_min",
+    "bl_height_max",
+}
+
+
+_MAX_STRUCT_DEPTH = 8  # guards against a pathological/cyclic property graph; never hit by any
+                        # real node or material property structure, which is always tree-shaped
+
+
+def _is_nested_value(value) -> bool:
+    """True for anything `_value_key` needs to walk INTO rather than compare directly with `==`
+    -- an ID datablock, a non-ID struct (ImageUser, ColorRamp, ...), or a collection."""
+    return isinstance(value, bpy.types.bpy_struct) or (hasattr(value, "__len__") and not isinstance(value, (str, bytes)))
+
+
+def _value_key(value, depth=0):
+    """Turns an arbitrary RNA property value into something plain `==` compares correctly for
+    the purpose of "would this look/render identically". An ID datablock (Image, NodeTree, Text,
+    ...) compares by its own identity (Blender's own bpy_struct `==` is a pointer compare for an
+    ID, which is exactly right here -- two different Image datablocks are different textures even
+    if they happen to hold the same pixels, so two materials that sample them are not safe to
+    treat as interchangeable). A *non-ID* nested struct (ImageUser, ColorRamp, CurveMapping, ...)
+    is walked recursively instead of compared by `==` directly: two separate node instances always
+    own two separate struct instances, so a plain `==` there is a pointer compare between objects
+    that can never be the same object even when every field inside genuinely matches -- caught
+    during development, since it would have silently blocked merging any material with an Image
+    Texture node at all (every one owns its own distinct ImageUser struct).
+    """
+    if isinstance(value, bpy.types.ID):
+        return value
+    if depth >= _MAX_STRUCT_DEPTH:
+        return value
+    if isinstance(value, bpy.types.bpy_struct):
+        return _struct_signature(value, depth + 1)
+    if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
+        try:
+            return tuple(_value_key(v, depth + 1) for v in value)
+        except TypeError:
+            return value
+    if isinstance(value, float):
+        return round(value, 6)
+    return value
+
+
+def _struct_signature(struct, depth=0) -> tuple:
+    sig = []
+    for prop in struct.bl_rna.properties:
+        if prop.identifier == "rna_type":
+            continue
+        value = getattr(struct, prop.identifier, None)
+        if prop.is_readonly and not _is_nested_value(value):
+            continue
+        sig.append((prop.identifier, _value_key(value, depth)))
+    return tuple(sig)
+
+
+def _rna_props_equal(a, b, ignored: set) -> bool:
+    """Compares every non-ignored RNA property of `a` and `b`. A property Blender marks
+    `is_readonly` is skipped only when its value is a plain scalar/array -- genuinely derived,
+    computed info that can't drift out of sync (e.g. a node's `dimensions`). Blender also marks a
+    POINTER property `is_readonly` whenever the *pointer itself* can't be reassigned, which is
+    just as true for a still-freely-mutable non-ID struct (ImageUser, ColorRamp, CurveMapping,
+    Mapping, ...) as for an ID reference -- naively skipping every readonly property would treat
+    two Color Ramp nodes with completely different ramps as identical (`color_ramp` is one such
+    readonly-pointer-to-mutable-struct property); caught during development and reproduced
+    directly before this guard was added.
+    """
+    for prop in a.bl_rna.properties:
+        pid = prop.identifier
+        if pid in ignored:
+            continue
+        va = getattr(a, pid, None)
+        vb = getattr(b, pid, None)
+        if prop.is_readonly and not _is_nested_value(va) and not _is_nested_value(vb):
+            continue
+        if isinstance(va, bpy.types.ID) or isinstance(vb, bpy.types.ID):
+            if va != vb:
+                return False
+            continue
+        if _value_key(va) != _value_key(vb):
+            return False
+    return True
+
+
+def _socket_default_equal(sock_a, sock_b) -> bool:
+    if sock_a.is_linked != sock_b.is_linked:
+        return False
+    if sock_a.is_linked:
+        return True  # the driving link itself is part of the node tree's own link-set comparison
+    if not hasattr(sock_a, "default_value"):
+        return True  # a socket type with nothing to hold constant (e.g. NodeSocketShader)
+    return _value_key(sock_a.default_value) == _value_key(sock_b.default_value)
+
+
+def _node_fully_identical(node_a, node_b) -> bool:
+    if node_a.bl_idname != node_b.bl_idname:
+        return False
+    if node_a.mute != node_b.mute:
+        return False
+    if len(node_a.inputs) != len(node_b.inputs) or len(node_a.outputs) != len(node_b.outputs):
+        return False
+    if not _rna_props_equal(node_a, node_b, _NODE_IGNORED_PROPS):
+        return False
+    return all(_socket_default_equal(sa, sb) for sa, sb in zip(node_a.inputs, node_b.inputs))
+
+
+def _link_signature(link) -> tuple:
+    return (link.from_node.name, link.from_socket.identifier, link.to_node.name, link.to_socket.identifier)
+
+
+def _node_tree_fully_identical(tree_a, tree_b) -> bool:
+    """True structural equality: the same set of node *names* (Blender auto-assigns identical
+    default names -- "Principled BSDF", "Image Texture", "Image Texture.001", ... -- to two node
+    trees built the same way, e.g. by the same importer/generator run twice, which is exactly the
+    real-world "duplicate material" case this is for), each matched pair of same-named nodes
+    identical per _node_fully_identical, and the exact same set of links between them. Two node
+    trees built by hand with genuinely different node names for equivalent graphs won't match --
+    conservative, not wrong: never merges two materials whose renders could actually differ.
+    """
+    if tree_a is tree_b:
+        return True
+    if len(tree_a.nodes) != len(tree_b.nodes) or len(tree_a.links) != len(tree_b.links):
+        return False
+    names_a = {n.name for n in tree_a.nodes}
+    if names_a != {n.name for n in tree_b.nodes}:
+        return False
+    for name in names_a:
+        if not _node_fully_identical(tree_a.nodes[name], tree_b.nodes[name]):
+            return False
+    links_a = {_link_signature(link) for link in tree_a.links}
+    links_b = {_link_signature(link) for link in tree_b.links}
+    return links_a == links_b
+
+
+def _material_fully_identical(mat_a, mat_b) -> bool:
+    """True material equality, not just "looks similar": every non-identity RNA property on the
+    Material datablock itself (blend_method, use_backface_culling, the legacy diffuse_color/
+    metallic/roughness fallback used when use_nodes is False, any add-on-registered settings such
+    as `.cycles`, ...), plus -- when use_nodes is True -- full node-tree structural equality
+    (_node_tree_fully_identical). A ShaderNodeGroup's own `node_tree` is an ID pointer compared by
+    identity like any other ID property: two materials referencing the *same* node-group
+    datablock are equal on that node; two referencing separately-authored node groups are not,
+    even if those groups are themselves structurally identical -- recursing into a referenced
+    node group's own internal graph is out of scope, the same "exact but not exhaustive" scope
+    boundary RM-035 drew at BEZIER interpolation and RM-037 drew at custom split normals.
+    """
+    if mat_a is mat_b:
+        return True
+    if not _rna_props_equal(mat_a, mat_b, _MATERIAL_IGNORED_PROPS):
+        return False
+    if mat_a.use_nodes:
+        if not mat_a.node_tree or not mat_b.node_tree:
+            return False
+        return _node_tree_fully_identical(mat_a.node_tree, mat_b.node_tree)
+    return True
+
+
+def _reassign_material_users(dup, canonical) -> None:
+    """Redirects every reference to `dup` onto `canonical` via Blender's own `ID.user_remap` --
+    not a hand-enumerated walk of mesh.materials and OBJECT-linked object.material_slots (this
+    function's first version), which misses any *other* material user Blender's own data model
+    has (a Curve/Text/MetaBall/GreasePencil/Volume object's own `.materials` list, a node group
+    referencing this material, ...): `user_remap` covers every real ID user in one call, verified
+    directly to also correctly redirect an OBJECT-linked slot override (not just the common
+    DATA-linked case), leaving `dup.users == 0` afterward. Caught by review.
+    """
+    dup.user_remap(canonical)
+
+
+def _merge_identical_materials() -> list:
+    """Merges every group of separate Material datablocks that are fully identical
+    (_material_fully_identical) onto one canonical datablock, reassigning every mesh-data material
+    slot and every per-object material-slot override (`link == 'OBJECT'`) that pointed at a
+    duplicate before removing it. Buckets first by (use_nodes, node count, link count) so the
+    expensive structural check only ever runs within a group of comparably-shaped materials, not
+    every pair in the file -- the same bucket-then-verify shape _instance_duplicate_meshes (RM-037)
+    uses for meshes.
+    """
+    materials = [m for m in bpy.data.materials if m.users > 0]
+    buckets = {}
+    for mat in materials:
+        node_count = len(mat.node_tree.nodes) if mat.use_nodes and mat.node_tree else 0
+        link_count = len(mat.node_tree.links) if mat.use_nodes and mat.node_tree else 0
+        buckets.setdefault((mat.use_nodes, node_count, link_count), []).append(mat)
+
+    merged = []
+    for bucket in buckets.values():
+        if len(bucket) < 2:
+            continue
+        unassigned = list(bucket)
+        while unassigned:
+            mat = unassigned.pop(0)
+            group = [mat]
+            remaining = []
+            for other in unassigned:
+                if _material_fully_identical(mat, other):
+                    group.append(other)
+                else:
+                    remaining.append(other)
+            unassigned = remaining
+            if len(group) < 2:
+                continue
+            canonical = group[0]
+            merged_names = []
+            for dup in group[1:]:
+                _reassign_material_users(dup, canonical)
+                merged_names.append(dup.name)
+                bpy.data.materials.remove(dup)
+            merged.append({"canonical_material": canonical.name, "merged_materials": merged_names})
+    return merged
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -898,6 +1121,10 @@ def run(args):
     if args.get("instance_duplicate_meshes"):
         meshes_instanced = _instance_duplicate_meshes(mesh_objs)
 
+    materials_merged = []
+    if args.get("merge_materials"):
+        materials_merged = _merge_identical_materials()
+
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
@@ -928,6 +1155,7 @@ def run(args):
         "keyframes_decimated_by_action": keyframes_decimated["by_action"],
         "shape_keys_removed": shape_keys_removed,
         "meshes_instanced": meshes_instanced,
+        "materials_merged": materials_merged,
         "output_path": args["output"],
         "warnings": warnings,
     }
