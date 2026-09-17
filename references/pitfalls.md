@@ -569,3 +569,75 @@ came out above its actual size and was correctly left untouched. A file with exa
 object degenerates cleanly to fraction 1.0 (that object's own bounding box IS the whole scene's),
 capping its textures at the full assumed viewport width -- the sensible default for a single
 hero asset with no other objects to be smaller than.
+
+## Pruning dead leaf bones needs a fixpoint loop, not one pass
+
+`optimize.py --remove-unused-bones` (RM-034) only ever removes a bone with no children (a leaf)
+and zero skin-weight influence and no fcurve animation -- a bone with a still-present child is
+never touched, even if that bone itself carries no weight, since a structural ancestor might
+still be needed to position a used descendant. That means a *chain* of two or more genuinely dead
+bones (e.g. `Used -> Dead1 -> Dead2`, both unweighted and unanimated) can't be fully pruned in a
+single pass: on pass one only `Dead2` is a leaf and qualifies; only after it's gone does `Dead1`
+become a leaf itself. `_remove_unused_bones()` re-scans the influence map and re-collects the
+leaf set after every removal (`while changed: ...`) rather than computing candidates once up
+front, so a chain of any depth is fully cleared in one call. `sparse_rig.blend`'s own fixture
+(`Head -> HeadTip`, `Arm1 -> Arm1Tip`, each dead bone one level deep and already a leaf on pass
+one) doesn't exercise the multi-level case -- it just confirms the base leaf+zero-influence+
+unanimated check. `--max-bones N`'s `_cap_bone_count()` needs the same per-removal re-scan of the
+*structural* candidate set (which bones are currently childless), since capping to a hard count
+means every subsequent victim has to be picked from whatever the tree currently looks like, not a
+stale leaf list computed before earlier removals changed its shape -- but not of the *influence*
+values themselves (see the next entry: those are cached and updated in place instead).
+
+## Root-vs-leaf bugs found by review: a weighted root bone loses its weight silently, and rescanning vertex data per removed bone doesn't scale
+
+A CodeRabbit review on RM-034's own PR caught three real bugs in the first version of
+`--remove-unused-bones`/`--max-bones` that neither the unit tests nor manual testing had
+exercised, because the sparse_rig.blend fixture happened not to hit any of these shapes:
+
+- **A weighted root bone (no parent) chosen as a `--max-bones` victim silently lost its weight.**
+  `_transfer_bone_weight_to_parent()` has always discarded a removed bone's weight when it has no
+  parent to receive it (documented as intentional -- there's nothing to reattach to). But
+  `_cap_bone_count()`'s candidate list only checked "is this bone a leaf and unanimated", not
+  "does this bone have a parent to transfer to" -- so a rig with an isolated, weighted root bone
+  (no parent, no children: a root *and* a leaf at once) could have that bone picked as the
+  lowest-influence victim and its vertex-group weight dropped with no warning, reporting
+  `reassigned_to: null` as if that were a normal outcome rather than data loss. Fixed by excluding
+  a weighted (`influence > 1e-6`) parentless bone from the candidate list entirely, the same way an
+  animated bone is excluded -- if that leaves no valid candidate, `_cap_bone_count` now stops and
+  warns ("...animated bone or a weighted root bone...") instead of silently dropping weight.
+  Verified two ways on a purpose-built `root_leaf_rig.blend` fixture (an isolated weighted root
+  bone plus a separate animated-child chain, `--max-bones 1`): with the fix, all three bones
+  survive and one warning is reported; reverting just the new exclusion check reproduces the old
+  bug exactly -- `RootA` gets demoted with `reassigned_to: null`, its weight gone.
+
+- **`_bone_influence()` matched a mesh's Armature modifier target by object identity
+  (`m.object == armature_obj`)**, which misses a mesh skinned to a *different* object that happens
+  to share the same armature *datablock* (Blender allows several ARMATURE objects to point at one
+  `bpy.types.Armature`, e.g. linked-duplicate rigs). `run()`'s own per-armature-object loop could
+  also visit the same shared datablock twice, editing already-removed bones on the second pass.
+  Fixed by matching on `m.object.data == armature_obj.data` instead of object identity throughout
+  (`_bone_influence`, `_transfer_bone_weight_to_parent`), and by deduping `run()`'s loop on
+  `arm.data` so each shared datablock is processed exactly once, with every mesh skinned to *any*
+  object sharing that data considered together.
+
+- **`_bone_influence()` re-scanned every mesh's full vertex/vertex-group data on every single
+  pruning round or capped-bone removal**, since both `_remove_unused_bones()`'s fixpoint loop and
+  `_cap_bone_count()`'s per-victim loop called it fresh each time. Neither function's own weight
+  *changes* actually require a fresh scan: `_remove_unused_bones` never transfers weight at all
+  (a bone it removes is dead by definition), and `_cap_bone_count`'s only weight change per
+  iteration -- moving a victim's cached influence onto its parent -- is a single dict update, not
+  a reason to re-read mesh data. Both functions now compute `_bone_influence` once up front and
+  (for the capping path) keep it in sync incrementally as bones are removed, rather than
+  rescanning. `_bone_influence` itself was also doing one pass per vertex group per mesh
+  (`for vg: for v: for g: if g.group == vg.index`) instead of one pass per mesh regardless of
+  group count -- switched to a single `for v: for g` pass keyed by group index.
+
+- **`_animated_bone_names()`'s regex (`r'pose\.bones\["([^"]+)"\]'`) stopped at the first `"`**,
+  but Blender escapes a literal quote or backslash inside a bone name (`BLI_str_escape`) when it
+  builds an fcurve's `data_path`, e.g. a bone literally named `Fin"Left` produces the path
+  `pose.bones["Fin\"Left"].location`. The old regex's capture group ended at that escaped quote,
+  so the matched "bone name" was truncated and never equaled the real `Bone.name` -- an animated
+  bone with a quote or backslash in its name would silently fail the `in animated` check and
+  become removable. Fixed with an escape-aware capture (`(?:\\.|[^"\\])*`) followed by
+  `bpy.utils.unescape_identifier()` to reverse Blender's own escaping before comparing.

@@ -149,7 +149,12 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   this fixes it); `--texture-colorspace NAME` is the blunt override, forcing every texture to one
   named colorspace (e.g. `ACEScg`/`ACES2065-1` for an ACES-aware pipeline -- Blender's own
   bundled OCIO config has no ACES *view transform* for rendering at all, only these texture-
-  tagging colorspaces, confirmed via its real enum).
+  tagging colorspaces, confirmed via its real enum). `--remove-unused-bones` prunes every bone
+  with zero skin-weight influence and no animation, from the leaves inward (never a bone a
+  still-used descendant needs); `--max-bones N` caps an armature at N bones -- a real
+  mobile-engine-style bone budget, not just a report -- removing the lowest-influence unanimated
+  leaf bones first and reassigning their skin weight to the parent bone, never removing an
+  animated bone even if the target can't otherwise be reached (warns instead).
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a

@@ -44,7 +44,7 @@ what v0.1.0 actually does.
 | RM-031 | optimize | 目標三角数指定でLOD0-3を一括生成 | done | #25 |
 | RM-032 | optimize | テクスチャアトラス化（複数マテリアル→1枚） | done | |
 | RM-033 | optimize | テクスチャ解像度の自動決定（画面占有率ベース） | done | #26 |
-| RM-034 | optimize | 未使用ボーン削除・ボーン数上限（モバイル向け） | planned | #27 |
+| RM-034 | optimize | 未使用ボーン削除・ボーン数上限（モバイル向け） | done | #27 |
 | RM-035 | optimize | アニメーションキーフレーム間引き（許容誤差指定） | planned | #28 |
 | RM-036 | optimize | シェイプキー削減 | planned | #29 |
 | RM-037 | optimize | インスタンス化（同一メッシュを共有） | planned | #30 |
@@ -92,7 +92,7 @@ what v0.1.0 actually does.
 | RM-079 | agent-ux | 進捗のETA表示（Blenderのフレーム進捗をパース） | planned | #69 |
 | RM-080 | agent-ux | `--ask`で曖昧な選択肢を質問形式で出力（エージェントがユーザーに転送） | planned | #70 |
 | RM-081 | ecosystem | Blender公式MCPサーバーとの併用ガイド（headlessで検証→ライブで微調整） | planned | #71 |
-| RM-082 | ecosystem | gltf-transform が入っていれば併用（Draco/meshopt/textureCompress） | planned | #72 |
+| RM-082 | ecosystem | gltf-transform が入っていれば併用（Draco/meshopt/textureCompress） | done | #72 |
 | RM-083 | ecosystem | three.js 用のプレビューHTML生成（model-viewer / three.js最小ビューア） | planned | #73 |
 | RM-084 | ecosystem | Unity/Unreal/Godot のimport設定JSON生成 | planned | #74 |
 | RM-085 | ecosystem | Sketchfab / Poly Haven からのCC0ダウンロードスクリプト（テスト用） | planned | #75 |

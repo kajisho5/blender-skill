@@ -877,6 +877,80 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(data["triangles_before"], 576)
         self.assertEqual(data["triangles_after"], 576)
 
+    def test_optimize_remove_unused_bones_prunes_only_genuinely_dead_leaves(self):
+        # sparse_rig.blend: Root -> Spine -> Head -> HeadTip (no weight, no animation -- dead)
+        #                              Spine -> Arm1 -> Arm1Tip (dead)
+        #                              Spine -> Arm2 (weight 0.2)
+        #                              Spine -> Arm3 (weight 0.05)
+        # Only HeadTip/Arm1Tip have zero skin-weight influence and no animation -- everything
+        # else (including the barely-weighted Arm2/Arm3) must survive untouched.
+        out = self.out / "pruned.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sparse_rig.blend"), "-o", str(out), "--remove-unused-bones", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(set(data["bones_removed"]), {"HeadTip", "Arm1Tip"})
+        self.assertEqual(data["bones_demoted"], [])
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(set(b["name"] for b in info["armatures"][0]["bones"]), {"Root", "Spine", "Head", "Arm1", "Arm2", "Arm3"})
+
+    def test_optimize_max_bones_removes_lowest_influence_first_and_transfers_weight(self):
+        out = self.out / "capped.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sparse_rig.blend"), "-o", str(out), "--max-bones", "4", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        # Lowest-influence-first order: the two genuinely dead bones, then Arm3 (0.05), then
+        # Arm2 (0.2) -- never touching the more-weighted Root/Spine/Head/Arm1.
+        self.assertEqual(
+            [d["bone"] for d in data["bones_demoted"]],
+            ["HeadTip", "Arm1Tip", "Arm3", "Arm2"],
+        )
+        self.assertEqual(data["bones_demoted"][2]["reassigned_to"], "Spine")
+        self.assertEqual(data["bones_demoted"][3]["reassigned_to"], "Spine")
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(set(b["name"] for b in info["armatures"][0]["bones"]), {"Root", "Spine", "Head", "Arm1"})
+
+    def test_optimize_max_bones_never_removes_an_animated_bone(self):
+        # sparse_rig_animated_arm3.blend: same rig, but Arm3 (the lowest-weight bone) now has a
+        # real keyframed location animation -- it must survive even though every other candidate
+        # outranks it by weight, and the tool must say so rather than silently forcing the count.
+        out = self.out / "capped_anim.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sparse_rig_animated_arm3.blend"), "-o", str(out), "--max-bones", "2", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["warnings"]), 1)
+        self.assertIn("animated bone", data["warnings"][0])
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        remaining = {b["name"] for b in info["armatures"][0]["bones"]}
+        self.assertIn("Arm3", remaining)
+        self.assertEqual(len(remaining), 3)  # couldn't reach 2, stopped at 3
+
+    def test_optimize_max_bones_never_drops_a_weighted_root_bones_own_weight(self):
+        # root_leaf_rig.blend: RootA is a root bone (no parent) with no children of its own --
+        # a "leaf" by the pruning definition -- and carries real skin weight (the whole mesh).
+        # RootB -> AnimKid is a separate chain where AnimKid is animated. With every other
+        # candidate excluded (RootB isn't a leaf, AnimKid is animated), a naive cap would pick
+        # RootA as the only remaining "leaf" and discard its weight since there's no parent to
+        # transfer it to (reassigned_to would be null). It must instead stop and warn, exactly
+        # as it already does for an animated bone, never dropping RootA or its weight.
+        out = self.out / "root_leaf_capped.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "root_leaf_rig.blend"), "-o", str(out), "--max-bones", "1", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["bones_demoted"], [])
+        self.assertEqual(len(data["warnings"]), 1)
+        self.assertIn("weighted root bone", data["warnings"][0])
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(set(b["name"] for b in info["armatures"][0]["bones"]), {"RootA", "RootB", "AnimKid"})
+
+    def test_optimize_rejects_non_positive_max_bones(self):
+        out = self.out / "bad.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sparse_rig.blend"), "-o", str(out), "--max-bones", "0", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")
