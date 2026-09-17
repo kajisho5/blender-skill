@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.19.0...blender-skill-v0.20.0) (2026-09-14)
+
+
+### Features
+
+* **optimize:** auto texture resolution from scene-relative size (RM-033) ([#139](https://github.com/kajisho5/blender-skill/issues/139)) ([d3181f9](https://github.com/kajisho5/blender-skill/commit/d3181f9fd7559df67fc693a36c8dfcf2e5c32ae8))
+
 ## [0.19.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.18.0...blender-skill-v0.19.0) (2026-09-14)
 
 
