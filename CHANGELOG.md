@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.22.0...blender-skill-v0.23.0) (2026-09-17)
+
+
+### Features
+
+* **optimize:** remove geometrically dead shape keys (RM-036) ([#145](https://github.com/kajisho5/blender-skill/issues/145)) ([8106b69](https://github.com/kajisho5/blender-skill/commit/8106b69c549d03ed00baee7bbb7191d56f151601))
+
 ## [0.22.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.21.0...blender-skill-v0.22.0) (2026-09-17)
 
 
