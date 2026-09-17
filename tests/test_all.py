@@ -927,6 +927,25 @@ class TestToolchain(unittest.TestCase):
         self.assertIn("Arm3", remaining)
         self.assertEqual(len(remaining), 3)  # couldn't reach 2, stopped at 3
 
+    def test_optimize_max_bones_never_drops_a_weighted_root_bones_own_weight(self):
+        # root_leaf_rig.blend: RootA is a root bone (no parent) with no children of its own --
+        # a "leaf" by the pruning definition -- and carries real skin weight (the whole mesh).
+        # RootB -> AnimKid is a separate chain where AnimKid is animated. With every other
+        # candidate excluded (RootB isn't a leaf, AnimKid is animated), a naive cap would pick
+        # RootA as the only remaining "leaf" and discard its weight since there's no parent to
+        # transfer it to (reassigned_to would be null). It must instead stop and warn, exactly
+        # as it already does for an animated bone, never dropping RootA or its weight.
+        out = self.out / "root_leaf_capped.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "root_leaf_rig.blend"), "-o", str(out), "--max-bones", "1", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["bones_demoted"], [])
+        self.assertEqual(len(data["warnings"]), 1)
+        self.assertIn("weighted root bone", data["warnings"][0])
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(set(b["name"] for b in info["armatures"][0]["bones"]), {"RootA", "RootB", "AnimKid"})
+
     def test_optimize_rejects_non_positive_max_bones(self):
         out = self.out / "bad.glb"
         proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sparse_rig.blend"), "-o", str(out), "--max-bones", "0", "--json")
