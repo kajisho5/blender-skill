@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.25.0...blender-skill-v0.26.0) (2026-09-17)
+
+
+### Features
+
+* **optimize:** target presets for sketchfab/vrchat/roblox/gltf-viewer/quicklook (RM-039) ([#151](https://github.com/kajisho5/blender-skill/issues/151)) ([05a49d4](https://github.com/kajisho5/blender-skill/commit/05a49d4421c79f101855971cefea5c052c36c8bd))
+
 ## [0.25.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.24.0...blender-skill-v0.25.0) (2026-09-17)
 
 
