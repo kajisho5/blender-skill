@@ -1060,6 +1060,18 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc2.returncode, 0, proc2.stderr)
         self.assertEqual(json.loads(proc2.stdout)["shape_keys_removed"], [])
 
+    def test_optimize_remove_unused_shape_keys_skips_absolute_mode_sequences(self):
+        # absolute_shape_key_rig.blend: Key.use_relative = False (a timed sequence, not a
+        # relative blend). StateA is geometrically identical to Basis (zero displacement from
+        # relative_key) but is still a real waypoint in the Absolute-mode sequence between Basis
+        # and StateB -- removing it would change how Blender interpolates between surviving
+        # states. Must never be touched (caught by review; see references/pitfalls.md).
+        out = self.out / "abs_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "absolute_shape_key_rig.blend"), "-o", str(out), "--remove-unused-shape-keys", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["shape_keys_removed"], [])
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

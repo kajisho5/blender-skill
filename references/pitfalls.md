@@ -697,3 +697,20 @@ which key it's *directly* relative to moves up one link. `_remove_unused_shape_k
 as a fixpoint loop (removing one link at a time and re-measuring), the same pattern as
 `_remove_unused_bones`, so a multi-level dead chain (A dead relative to Basis, B dead relative to
 A, C real relative to B) fully resolves in one call rather than leaving inner links behind.
+
+## A shape key's `relative_key` displacement only means "geometrically inert" in Relative mode
+
+`Key.use_relative` (default `True` for anything made via `shape_key_add()`, so never an issue on
+a glTF import or normally-authored file) can be set `False` to make a mesh's shape keys play as
+an Absolute, timed sequence instead of a relative blend -- each key is a state at its own
+`eval_time`, interpolated against its *neighbors in the key stack* (LINEAR/CARDINAL/
+CATMULL_ROM/BSPLINE), not blended from `relative_key` at all. `_remove_unused_shape_keys`'s
+first version measured every key's displacement from `relative_key` regardless of this flag --
+in Absolute mode that number doesn't describe how the key actually functions: a key that happens
+to be geometrically identical to its relative_key (a genuinely dead link in Relative mode) can
+still be a real, load-bearing waypoint in an Absolute sequence, and removing it changes how
+Blender interpolates between the states around it. Caught by review; fixed by skipping any mesh
+whose `Key.use_relative` is `False` entirely -- verified on a purpose-built fixture
+(`absolute_shape_key_rig.blend`: Basis, a geometrically-identical-to-Basis `StateA`, and a real
+`StateB`, with `use_relative = False`) two ways: with the guard, nothing is removed; reverting
+just the guard reproduces the bug exactly, removing `StateA`.

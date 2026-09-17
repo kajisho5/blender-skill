@@ -613,11 +613,20 @@ def _remove_unused_shape_keys(mesh_objs) -> list:
     own obj.shape_key_remove() automatically re-points every shape key that referenced the removed
     one's `relative_key` onto *its* relative_key (verified directly against real Blender), so a
     multi-level dead chain resolves correctly without this function managing the chain itself.
+
+    Skips any mesh using Absolute shape keys (`Key.use_relative == False`) entirely: there,
+    `relative_key`/displacement isn't what actually drives the shape at all -- each key is a
+    timed sequence state selected by `eval_time`, interpolated against its *neighbors in the key
+    stack* (LINEAR/CARDINAL/CATMULL_ROM/BSPLINE), so a key that happens to be geometrically
+    identical to its relative_key can still be a real, load-bearing waypoint in that sequence's
+    shape. `shape_key_add()` sets `use_relative = True` by default (verified directly), so this
+    never affects a glTF import or any file whose shape keys were authored the normal way --
+    Absolute mode is an explicit, comparatively rare choice.
     """
     removed = []
     for obj in mesh_objs:
         sk = obj.data.shape_keys
-        if not sk:
+        if not sk or not sk.use_relative:
             continue
         reference = sk.reference_key
         changed = True
