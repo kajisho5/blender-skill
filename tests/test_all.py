@@ -1232,6 +1232,18 @@ class TestToolchain(unittest.TestCase):
         info = json.loads(run("info.py", str(out), "--json").stdout)
         self.assertLessEqual(info["meshes"]["triangles"], 20_000)
 
+    def test_optimize_explicit_decimate_ratio_overrides_a_targets_triangle_budget(self):
+        # An explicit --decimate-ratio must win over --target-roblox's own budget-derived ratio,
+        # not just happen to produce a similar result: --decimate-ratio 0.9 on the same
+        # 20,480-triangle fixture gives exactly 20480*0.9 = 18432 -- a value the budget-derived
+        # ratio (20000/20480 ~= 0.9766) would never produce, proving the explicit value was
+        # actually used rather than silently ignored in favor of the target's own default.
+        out = self.out / "sphere_roblox_explicit_ratio.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "highpoly_sphere.blend"), "-o", str(out), "--target-roblox", "--decimate-ratio", "0.9", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_after"], 18432)
+
     def test_optimize_target_roblox_never_decimates_two_individually_compliant_meshes(self):
         # two_compliant_meshes.blend: SphereA/SphereB, 18,800 triangles each (individually under
         # Roblox's real 20,000-triangle-*per-mesh* cap) but 37,600 combined. Roblox's own limit is
