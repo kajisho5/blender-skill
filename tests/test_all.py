@@ -1232,6 +1232,21 @@ class TestToolchain(unittest.TestCase):
         info = json.loads(run("info.py", str(out), "--json").stdout)
         self.assertLessEqual(info["meshes"]["triangles"], 20_000)
 
+    def test_optimize_target_roblox_never_decimates_two_individually_compliant_meshes(self):
+        # two_compliant_meshes.blend: SphereA/SphereB, 18,800 triangles each (individually under
+        # Roblox's real 20,000-triangle-*per-mesh* cap) but 37,600 combined. Roblox's own limit is
+        # explicitly per individual mesh, not a scene total -- summing before comparing (this
+        # feature's first version, shared with --target-vrchat/--target-quicklook, which really
+        # are whole-avatar/whole-scene budgets) would wrongly decimate both meshes down to fit a
+        # 20,000 *aggregate*, a case Roblox's real limit never actually restricts. Reproduced
+        # directly: reverting just the per-mesh fix decimates this fixture to 20,000 combined.
+        out = self.out / "two_compliant_roblox.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "two_compliant_meshes.blend"), "-o", str(out), "--target-roblox", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_before"], 37600)
+        self.assertEqual(data["triangles_after"], 37600)
+
     def test_optimize_target_triangle_budget_is_a_noop_when_already_within_budget(self):
         # The same 20,480-triangle fixture is well under --target-vrchat's 70,000 and
         # --target-quicklook's 100,000 triangle_budget -- neither should decimate anything.

@@ -144,10 +144,16 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   triangle threshold, Roblox's official per-mesh triangle/texture caps, Apple's own AR Quick Look
   guidance), cited in `PRESETS`' own comment in `scripts/bpy/optimize.py`, not invented; a preset
   with a real *absolute* platform triangle cap (`vrchat`/`roblox`/`quicklook`) converts it into an
-  actual decimate ratio from the file's own real pre-decimate triangle count at run time, so the
-  output is really at or under that cap regardless of how big the input was to start -- not a
-  fixed fraction that couldn't guarantee compliance for an arbitrary input size, a no-op when the
-  file is already within budget; `--draco`/`--meshopt`/`--ktx2` delegate
+  actual decimate ratio at run time, so the output is really at or under that cap regardless of
+  how big the input was to start -- not a fixed fraction that couldn't guarantee compliance for an
+  arbitrary input size, a no-op when already within budget. `vrchat`/`quicklook` compute one
+  shared ratio from the *whole file's combined* triangle count, matching how those platforms
+  actually evaluate a budget (one avatar/one scene as a whole); `roblox` instead clamps each mesh
+  object *independently* against the same absolute number, since Roblox's own real limit is
+  explicitly per individual mesh, not a scene total -- an aggregate ratio there would needlessly
+  decimate two already-individually-compliant meshes just because their combined total crossed
+  the cap, a case Roblox's real limit never actually restricts (caught by review; see
+  `references/pitfalls.md`); `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
   so and skip just that step when they aren't. `--recalc-normals` warns instead of silently
