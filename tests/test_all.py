@@ -1100,6 +1100,44 @@ class TestToolchain(unittest.TestCase):
         for name in ("CubeB1", "CubeB2", "CubeC1", "CubeC2"):
             self.assertIn(name, candidates)
 
+    def test_optimize_instance_duplicate_meshes_checks_material_index_and_smoothing(self):
+        # material_index_rig.blend: MatIdxA/B share the same two materials in the same slot
+        # order and identical geometry, but one face's material_index differs -- must not merge.
+        # SmoothA/B are identical except one face's use_smooth -- must not merge either. Caught
+        # by review; see references/pitfalls.md.
+        out = self.out / "matidx_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "material_index_rig.blend"), "-o", str(out), "--instance-duplicate-meshes", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["meshes_instanced"], [])
+
+    def test_optimize_instance_duplicate_meshes_checks_sharp_faces_and_layer_names(self):
+        # sharp_uvname_rig.blend: SharpA/B are identical except one face is marked sharp on B;
+        # UVNameA/B have identical UV coordinates under different layer names; ColNameA/B have
+        # identical color-attribute values under different names. A shared material's node tree
+        # can look up a UV/color layer by name, so none of these three pairs may merge. Caught by
+        # review; see references/pitfalls.md.
+        out = self.out / "sharp_uvname_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sharp_uvname_rig.blend"), "-o", str(out), "--instance-duplicate-meshes", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["meshes_instanced"], [])
+
+    def test_optimize_instance_duplicate_meshes_never_touches_a_datablock_an_animatable_object_still_uses(self):
+        # shared_data_rig.blend: SharedA and SharedB point at the SAME mesh datablock; SharedB
+        # has an Armature modifier, SharedA doesn't. Other is a separate, geometrically-identical
+        # cube on its own datablock. Filtering *objects* by animatability before grouping by
+        # datablock (the first version of this feature) would still route SharedA into a merge
+        # group and free the shared datablock while SharedB silently still pointed at it -- a
+        # real crash, confirmed by reverting just this fix (StructRNA of type Object has been
+        # removed). The whole datablock must be excluded whenever any of its users is
+        # animatable, so nothing here should merge at all.
+        out = self.out / "shared_data_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "shared_data_rig.blend"), "-o", str(out), "--instance-duplicate-meshes", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["meshes_instanced"], [])
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

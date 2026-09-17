@@ -172,11 +172,18 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   one onto *its* relative_key (verified directly against real Blender), so removing a chain of
   dead keys one at a time still lands every surviving key on the right base.
   `--instance-duplicate-meshes` merges every group of mesh objects on separate datablocks that
-  are fully identical -- exact vertex positions, face topology, UV coordinates, vertex-color
-  values, and the exact same Material datablocks (not just similarly shaped; stricter than
-  `info.py`'s own loose `duplicate_mesh_candidates` suggestion) -- onto one shared datablock,
-  freeing the now-orphaned duplicates. Never touches a mesh with shape keys or an Armature
-  modifier: shared mesh data means shared shape-key/vertex-weight *state* in Blender's own data
+  are fully identical within a tight floating-point tolerance -- vertex positions, face topology
+  plus per-face material_index/use_smooth, sharp-face/sharp-edge marks, every UV layer's
+  name/active-render flag/coordinates, every color attribute's name/values and the mesh's
+  render-fallback selection, and the exact same Material datablocks (not just similarly shaped;
+  stricter than `info.py`'s own loose `duplicate_mesh_candidates` suggestion) -- onto one shared
+  datablock, freeing the now-orphaned duplicates. A material's node tree can look up a UV layer
+  or color attribute by *name*, so two meshes with identical values under different layer names
+  or a different render fallback are correctly left unmerged, not just ones with different raw
+  values (see `references/pitfalls.md`). Never merges a mesh with custom split normals (exact
+  comparison is out of scope) or touches a mesh with shape keys or an Armature modifier -- or any
+  datablock shared with such a mesh, even one of its *other* users would individually have
+  qualified: shared mesh data means shared shape-key/vertex-weight *state* in Blender's own data
   model, not just shared shape, so merging those could silently change animated behavior.
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
