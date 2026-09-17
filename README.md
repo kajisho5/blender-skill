@@ -138,7 +138,16 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   from how much of the whole file's combined bounding box the largest object using that texture
   spans -- a real, data-driven screen-occupancy proxy this skill has no way to get from an actual
   camera/FOV, times `--viewport-width` (default 1920), rounded to the next power of two;
-  `--target-web`/`--target-mobile`/`--target-ar` presets; `--draco`/`--meshopt`/`--ktx2` delegate
+  `--target-web`/`--target-mobile`/`--target-ar`/`--target-sketchfab`/`--target-vrchat`/
+  `--target-roblox`/`--target-gltf-viewer`/`--target-quicklook` presets -- each grounded in that
+  platform's own published numbers where one exists (VRChat's official PC "Good" Performance Rank
+  triangle threshold, Roblox's official per-mesh triangle/texture caps, Apple's own AR Quick Look
+  guidance), cited in `PRESETS`' own comment in `scripts/bpy/optimize.py`, not invented; a preset
+  with a real *absolute* platform triangle cap (`vrchat`/`roblox`/`quicklook`) converts it into an
+  actual decimate ratio from the file's own real pre-decimate triangle count at run time, so the
+  output is really at or under that cap regardless of how big the input was to start -- not a
+  fixed fraction that couldn't guarantee compliance for an arbitrary input size, a no-op when the
+  file is already within budget; `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
   so and skip just that step when they aren't. `--recalc-normals` warns instead of silently
