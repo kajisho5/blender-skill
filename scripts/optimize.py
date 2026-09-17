@@ -17,6 +17,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --origin bottom
   python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
   python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --keyframe-decimate 0.01
 """
 import argparse
 import json
@@ -54,6 +55,7 @@ def main() -> int:
     ap.add_argument("--texture-colorspace", metavar="NAME", help="force every texture's colorspace tag to NAME regardless of role (e.g. 'ACEScg', 'ACES2065-1', 'sRGB', 'Non-Color') -- a blunt override, not per-socket correction; see --fix-colorspace for that. Rejected together with --fix-colorspace.")
     ap.add_argument("--remove-unused-bones", action="store_true", help="prune every bone with zero skin-weight influence and no animation, from the leaves inward -- never touches a bone a still-used descendant needs, or one that's animated")
     ap.add_argument("--max-bones", type=int, metavar="N", help="reduce each armature to at most N bones (a real budget cap, e.g. for mobile skinning limits): removes the lowest-influence unanimated leaf bones first (including genuinely unused ones, for free), transferring each one's skin weight to its parent. Never removes an animated bone -- warns instead if the cap can't be reached without one.")
+    ap.add_argument("--keyframe-decimate", type=float, metavar="TOLERANCE", help="reduce every action's keyframe count via Ramer-Douglas-Peucker curve simplification: a keyframe is dropped only if linear interpolation across its removal would deviate by at most TOLERANCE from its real value (in that fcurve's own units -- Blender units for location, radians for rotation, unitless for scale). The first/last keyframe of every fcurve always survives. Must be > 0.")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -82,6 +84,8 @@ def main() -> int:
             raise SkillError("--webp needs a glb/gltf output (EXT_texture_webp is a glTF extension)", kind="input")
         if args.max_bones is not None and args.max_bones < 1:
             raise SkillError("--max-bones must be at least 1", kind="input")
+        if args.keyframe_decimate is not None and args.keyframe_decimate <= 0:
+            raise SkillError("--keyframe-decimate must be greater than 0", kind="input")
 
         bpy_args = {
             "path": str(in_path.resolve()), "format": in_fmt,
@@ -95,6 +99,7 @@ def main() -> int:
             "webp": args.webp, "webp_quality": args.webp_quality,
             "fix_colorspace": args.fix_colorspace, "texture_colorspace": args.texture_colorspace,
             "remove_unused_bones": args.remove_unused_bones, "max_bones": args.max_bones,
+            "keyframe_decimate": args.keyframe_decimate,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -176,6 +181,9 @@ def main() -> int:
         if data["bones_demoted"]:
             for d in data["bones_demoted"]:
                 print(f"  bone {d['bone']} removed, weight reassigned to {d['reassigned_to']}")
+        if data["keyframe_points_before"]:
+            kf_pct = (1 - data["keyframe_points_after"] / data["keyframe_points_before"]) * 100
+            print(f"  keyframes: {data['keyframe_points_before']} -> {data['keyframe_points_after']} ({kf_pct:.0f}% reduction)")
         for d in data["delegated"]:
             print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
         for w in data.get("warnings", []):

@@ -641,3 +641,17 @@ exercised, because the sparse_rig.blend fixture happened not to hit any of these
   bone with a quote or backslash in its name would silently fail the `in animated` check and
   become removable. Fixed with an escape-aware capture (`(?:\\.|[^"\\])*`) followed by
   `bpy.utils.unescape_identifier()` to reverse Blender's own escaping before comparing.
+
+## A fractional last keyframe can get truncated to an integer frame on glTF export, with no decimation involved
+
+Verified on fox.glb's own "Run" animation, whose real last keyframe sits at frame 27.8 (not a
+round number -- Khronos's sample assets aren't always authored on whole frames). A plain
+`optimize.py fox.glb -o out.glb` with **no** flags at all (`--keyframe-decimate` included)
+re-exports it with `frame_end` truncated to 27.0 -- `info.py`'s reported animation duration
+shrinks accordingly. This is `optimize.py`'s own default (non-multi-action) glTF export path
+rounding/clamping frame bounds, not a bug introduced by `--keyframe-decimate` (RM-035): a test
+comparing `--keyframe-decimate`'s before/after animation bounds has to diff against a plain
+pass-through export of the same file through the same export path, not against the original
+source file, or it flags this pre-existing, unrelated quirk as a regression. Not yet root-caused
+further (which exact export kwarg governs it) or fixed -- filed here so it isn't rediscovered
+from scratch and isn't confused with a `--keyframe-decimate` correctness bug.

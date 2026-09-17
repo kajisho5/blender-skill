@@ -154,7 +154,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   still-used descendant needs); `--max-bones N` caps an armature at N bones -- a real
   mobile-engine-style bone budget, not just a report -- removing the lowest-influence unanimated
   leaf bones first and reassigning their skin weight to the parent bone, never removing an
-  animated bone even if the target can't otherwise be reached (warns instead).
+  animated bone even if the target can't otherwise be reached (warns instead). `--keyframe-
+  decimate TOLERANCE` thins every action's keyframes with Ramer-Douglas-Peucker curve
+  simplification: a keyframe is dropped only if linear interpolation across its removal would
+  deviate by at most TOLERANCE (in that fcurve's own units) from its real value, and the
+  first/last keyframe of every fcurve always survives.
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a

@@ -486,6 +486,85 @@ def _cap_bone_count(armature_obj, mesh_objs, max_bones: int):
     return demoted, warning
 
 
+def _decimate_fcurve(fcurve, tolerance: float) -> tuple:
+    """Reduces one fcurve's keyframe count with Ramer-Douglas-Peucker curve simplification,
+    using vertical (value) distance from the straight line between the current segment's two
+    endpoints as the error metric -- not raw 2D Euclidean distance, since frame and value live on
+    incomparable axes (a frame number is not a distance in the same units as a location or
+    rotation value). A keyframe survives if removing it would make the curve deviate by more than
+    `tolerance` (in the fcurve's own value units) from linear interpolation between its
+    surviving neighbors at that keyframe's own frame; the first and last keyframes always
+    survive. Returns (keyframes_before, keyframes_after).
+    """
+    points = [(kp.co.x, kp.co.y) for kp in fcurve.keyframe_points]
+    n = len(points)
+    if n < 3:
+        return n, n
+    keep = [False] * n
+    keep[0] = keep[-1] = True
+    stack = [(0, n - 1)]
+    while stack:
+        start_i, end_i = stack.pop()
+        if end_i - start_i < 2:
+            continue
+        start_frame, start_val = points[start_i]
+        end_frame, end_val = points[end_i]
+        span = end_frame - start_frame
+        max_err = -1.0
+        max_idx = -1
+        for i in range(start_i + 1, end_i):
+            frame, val = points[i]
+            interp = start_val if span == 0 else start_val + (frame - start_frame) / span * (end_val - start_val)
+            err = abs(val - interp)
+            if err > max_err:
+                max_err = err
+                max_idx = i
+        if max_err > tolerance:
+            keep[max_idx] = True
+            stack.append((start_i, max_idx))
+            stack.append((max_idx, end_i))
+    # Remove in descending index order: removing a higher index never shifts a lower, still-
+    # unprocessed one, so every index computed above stays valid throughout.
+    for i in range(n - 1, -1, -1):
+        if not keep[i]:
+            fcurve.keyframe_points.remove(fcurve.keyframe_points[i], fast=True)
+    fcurve.update()
+    return n, sum(keep)
+
+
+def _decimate_keyframes(tolerance: float) -> dict:
+    """Reduces keyframe count on every fcurve of every action in the file (whichever ones end up
+    exported is the exporter's own choice -- see anim.py/_compat.export_multi_action -- so every
+    action is decimated the same way regardless, harmless for one that isn't exported). Uses a
+    from-scratch Ramer-Douglas-Peucker implementation (_decimate_fcurve) rather than Blender's own
+    Graph Editor `graph.decimate` operator: that operator needs a live Graph Editor area/region to
+    run against, and true headless Blender (`-b`) has no window or screen at all to provide one.
+    """
+    before_total = 0
+    after_total = 0
+    by_action = []
+    for action in bpy.data.actions:
+        action_before = 0
+        action_after = 0
+        for fc in action.fcurves:
+            b, a = _decimate_fcurve(fc, tolerance)
+            action_before += b
+            action_after += a
+        before_total += action_before
+        after_total += action_after
+        if action_before:
+            by_action.append({
+                "action": action.name,
+                "keyframe_points_before": action_before,
+                "keyframe_points_after": action_after,
+            })
+    return {
+        "keyframe_points_before": before_total,
+        "keyframe_points_after": after_total,
+        "by_action": by_action,
+    }
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -576,6 +655,10 @@ def run(args):
                 if bone_warning:
                     warnings.append(bone_warning)
 
+    keyframes_decimated = {"keyframe_points_before": 0, "keyframe_points_after": 0, "by_action": []}
+    if args.get("keyframe_decimate"):
+        keyframes_decimated = _decimate_keyframes(args["keyframe_decimate"])
+
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
@@ -601,6 +684,9 @@ def run(args):
         "texture_colorspace_changed": texture_colorspace_changed,
         "bones_removed": bones_removed,
         "bones_demoted": bones_demoted,
+        "keyframe_points_before": keyframes_decimated["keyframe_points_before"],
+        "keyframe_points_after": keyframes_decimated["keyframe_points_after"],
+        "keyframes_decimated_by_action": keyframes_decimated["by_action"],
         "output_path": args["output"],
         "warnings": warnings,
     }
