@@ -1006,6 +1006,34 @@ class TestToolchain(unittest.TestCase):
         proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "keyframe_curve.blend"), "-o", str(out), "--keyframe-decimate", "0", "--json")
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_optimize_rejects_nan_keyframe_decimate(self):
+        # A straight `<= 0` check lets NaN through (`nan <= 0` is False) -- caught by review.
+        out = self.out / "bad_kf_nan.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "keyframe_curve.blend"), "-o", str(out), "--keyframe-decimate", "nan", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_optimize_keyframe_decimate_never_exceeds_tolerance_on_a_constant_curve(self):
+        # constant_curve.blend: (0,0.0) (5,1.0) (10,1.0), CONSTANT interpolation throughout.
+        # A straight-line error estimate at frame 5 is |1.0-0.5|=0.5 -- under tolerance 0.75, so
+        # a version that assumed linear interpolation would wrongly remove it. The real
+        # CONSTANT-governed curve holds 0.0 from frame 0 to 10, so the true error is |1.0-0.0|=
+        # 1.0 -- frame 5 must survive at any tolerance below 1.0 (caught by review; see
+        # references/pitfalls.md for the full worked example).
+        out = self.out / "const_low_tol.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "constant_curve.blend"), "-o", str(out), "--keyframe-decimate", "0.75", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["keyframe_points_after"], 3)  # frame 5 protected, nothing removed
+
+    def test_optimize_keyframe_decimate_removes_a_constant_keyframe_once_true_error_fits(self):
+        # Same curve, but tolerance 1.5 is above the *real* CONSTANT error (1.0) -- frame 5 is
+        # correctly removed once the exact (not straight-line) error is what's being measured.
+        out = self.out / "const_high_tol.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "constant_curve.blend"), "-o", str(out), "--keyframe-decimate", "1.5", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["keyframe_points_after"], 2)
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

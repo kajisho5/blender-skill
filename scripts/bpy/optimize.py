@@ -486,17 +486,30 @@ def _cap_bone_count(armature_obj, mesh_objs, max_bones: int):
     return demoted, warning
 
 
+_EXACTLY_EVALUABLE_INTERPOLATIONS = {"LINEAR", "CONSTANT"}
+
+
 def _decimate_fcurve(fcurve, tolerance: float) -> tuple:
-    """Reduces one fcurve's keyframe count with Ramer-Douglas-Peucker curve simplification,
-    using vertical (value) distance from the straight line between the current segment's two
-    endpoints as the error metric -- not raw 2D Euclidean distance, since frame and value live on
-    incomparable axes (a frame number is not a distance in the same units as a location or
-    rotation value). A keyframe survives if removing it would make the curve deviate by more than
-    `tolerance` (in the fcurve's own value units) from linear interpolation between its
-    surviving neighbors at that keyframe's own frame; the first and last keyframes always
-    survive. Returns (keyframes_before, keyframes_after).
+    """Reduces one fcurve's keyframe count with Ramer-Douglas-Peucker curve simplification. A
+    keyframe is only ever removed from a segment whose *governing* keyframe (the one that starts
+    it -- interpolation is a per-keyframe property describing the segment TO the next surviving
+    keyframe) uses LINEAR or CONSTANT interpolation, the two modes where the exact value
+    Blender's own curve holds at any frame after the removal is cheaply computable: a straight
+    line for LINEAR, or a flat step holding the segment-start's value for CONSTANT. Any other
+    interpolation (BEZIER -- Blender's own default for a hand-keyed action -- and the named
+    easing curves) is left completely untouched: reproducing Blender's real Bezier evaluation
+    (frame is itself a cubic function of the curve parameter, via each keyframe's own handle
+    positions) exactly enough to still guarantee the requested tolerance is out of scope, and an
+    approximation risks silently exceeding it -- verified: naively measuring error against the
+    *straight line* between two CONSTANT-governed keyframes (rather than the real flat step) can
+    accept a keyframe whose real removal error is far larger than the straight-line estimate
+    (worked example in references/pitfalls.md). This is not a hobbled feature for this skill's
+    primary real input, though: every fcurve Blender's own glTF importer produces uses LINEAR
+    interpolation (verified on fox.glb -- 10458/10458 keyframe points, zero exceptions).
+
+    The first and last keyframes always survive. Returns (keyframes_before, keyframes_after).
     """
-    points = [(kp.co.x, kp.co.y) for kp in fcurve.keyframe_points]
+    points = [(kp.co.x, kp.co.y, kp.interpolation) for kp in fcurve.keyframe_points]
     n = len(points)
     if n < 3:
         return n, n
@@ -507,14 +520,21 @@ def _decimate_fcurve(fcurve, tolerance: float) -> tuple:
         start_i, end_i = stack.pop()
         if end_i - start_i < 2:
             continue
-        start_frame, start_val = points[start_i]
-        end_frame, end_val = points[end_i]
+        start_frame, start_val, start_interp = points[start_i]
+        if start_interp not in _EXACTLY_EVALUABLE_INTERPOLATIONS:
+            for i in range(start_i + 1, end_i):
+                keep[i] = True
+            continue
+        end_frame, end_val, _ = points[end_i]
         span = end_frame - start_frame
         max_err = -1.0
         max_idx = -1
         for i in range(start_i + 1, end_i):
-            frame, val = points[i]
-            interp = start_val if span == 0 else start_val + (frame - start_frame) / span * (end_val - start_val)
+            frame, val, _ = points[i]
+            if start_interp == "CONSTANT":
+                interp = start_val
+            else:
+                interp = start_val if span == 0 else start_val + (frame - start_frame) / span * (end_val - start_val)
             err = abs(val - interp)
             if err > max_err:
                 max_err = err
