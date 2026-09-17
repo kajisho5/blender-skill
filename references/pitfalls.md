@@ -828,3 +828,20 @@ losing a real material assignment on export. Caught by review; fixed by calling 
 `dup.user_remap(canonical)` instead of a hand-enumerated walk -- it redirects every real ID user
 in one call, verified to also correctly handle the OBJECT-linked slot-override case the old code
 special-cased, leaving `dup.users == 0` afterward either way.
+
+## A platform's real triangle cap can be per-mesh, not per-scene -- don't blindly sum before comparing
+
+RM-039's `--target-roblox` preset's first version reused the same "sum every mesh object's
+triangles, then derive one shared decimate ratio from that total" logic `--target-vrchat`/
+`--target-quicklook` use -- correct for those two (VRChat's own Performance Rank system evaluates
+an avatar's *total* triangle count across every one of its mesh renderers combined, and Apple's
+AR Quick Look guidance is a whole-scene/object budget for the thing actually being previewed), but
+wrong for Roblox: its real published limit ("individual meshes cannot exceed 20,000 triangles",
+create.roblox.com/docs/art/modeling/specifications) is explicitly *per mesh*, not a scene total.
+Applying it as an aggregate could needlessly decimate two already-individually-compliant meshes
+just because their *combined* total crossed 20,000 -- a case Roblox's real limit never actually
+restricts. Caught by review. Fixed by giving each `triangle_budget` preset an explicit
+`triangle_budget_scope` ("aggregate", the default, or "per_mesh"), and clamping each mesh object
+independently against the same absolute number when it's "per_mesh" -- never assume every
+per-object platform budget generalizes to "sum the whole file and derive one ratio" just because
+that's what two out of three real examples happened to want.

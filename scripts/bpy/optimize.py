@@ -23,11 +23,52 @@ import info as info_mod
 
 # Opinionated defaults, not a spec any external authority publishes -- texture caps and decimate
 # ratios a reasonable default for that destination, meant to be overridden with the specific
-# flags (--texture-max, --decimate-ratio) when they don't fit an asset.
+# flags (--texture-max, --decimate-ratio) when they don't fit an asset. `triangle_budget`, where
+# set, is an *absolute* triangle count a real platform publishes -- unlike a fixed `decimate_ratio`
+# (a fraction that can't guarantee compliance for an arbitrary input size), it's converted into an
+# actual ratio at run time from the file's own real pre-decimate triangle count (see `run()`), so
+# the output is really at or under the budget regardless of how big the input was to start.
+# `triangle_budget_scope` says what that count is a budget *of*: "aggregate" (the default -- the
+# whole file's combined mesh triangle total, matching how VRChat/Quick Look actually evaluate a
+# budget: one avatar or one scene as a whole, not a per-part limit) or "per_mesh" (each mesh
+# object clamped independently against the same number, matching a platform whose own published
+# limit is explicitly per individual mesh, not a scene/avatar total -- caught by review: an
+# earlier version applied Roblox's real per-mesh cap as if it were an aggregate scene budget,
+# which could needlessly decimate two already-individually-compliant meshes just because their
+# *sum* crossed 20,000, a case Roblox's own limit never actually restricts). Sources for every
+# target below are cited so a stale number can be found and re-verified against the platform's
+# own current docs, the same "not each platform's official published spec, treat as worth
+# re-checking" caveat check.py's own budgets already carry:
+# - sketchfab: no official triangle cap; upload limit 100MB (free)/200MB (Pro); "1 to 4 4K
+#   textures" is Sketchfab's own recommendation. https://help.sketchfab.com/hc/en-us/articles/202508836
+# - vrchat: official Performance Rank thresholds, PC "Good" tier (70,000 triangles, evaluated as
+#   the avatar's *total* triangle count across every one of its mesh renderers combined -- an
+#   aggregate budget, not a per-mesh one); texture pixel dimension isn't itself published (VRChat
+#   budgets total *texture memory*, which also depends on compression format Blender's own glTF
+#   export doesn't control) --2048 is a common single-atlas size that fits the Good tier's 75MB
+#   texture-memory budget in practice. https://creators.vrchat.com/avatars/avatar-performance-ranking-system/
+# - roblox: official "individual meshes cannot exceed 20,000 triangles" -- a real *per-mesh* cap,
+#   applied here per mesh object accordingly (triangle_budget_scope "per_mesh"), not summed across
+#   the file; texture cap for diffuse/normal/roughness/metallic is 1024x1024 in Studio.
+#   https://create.roblox.com/docs/art/modeling/specifications
+# - gltf-viewer: no single official numeric authority for "a generic web-based glTF viewer" --
+#   Khronos's own 3D Commerce guidelines recommend profile-based budgets (desktop web/XR/mobile
+#   AR) rather than one fixed number. A lighter, faster-loading preset than --target-web's own
+#   delivery-quality defaults, for casual inspection rather than production delivery.
+#   https://www.khronos.org/blog/introducing-asset-creation-guidelines-2.0-siggraph-2025
+# - quicklook (Apple AR Quick Look / USDZ): ~100,000 triangles (a whole-scene/object budget for
+#   the thing actually being previewed, not a per-mesh-part limit), 2048x2048 textures for
+#   hero/fine-detail objects (1024 is enough for most products), <10MB file size for instant
+#   loading. https://developer.apple.com/videos/play/wwdc2024/10186/
 PRESETS = {
-    "web": {"texture_max": 2048, "decimate_ratio": None},
-    "mobile": {"texture_max": 1024, "decimate_ratio": 0.5},
-    "ar": {"texture_max": 2048, "decimate_ratio": 0.7},
+    "web": {"texture_max": 2048, "decimate_ratio": None, "triangle_budget": None},
+    "mobile": {"texture_max": 1024, "decimate_ratio": 0.5, "triangle_budget": None},
+    "ar": {"texture_max": 2048, "decimate_ratio": 0.7, "triangle_budget": None},
+    "sketchfab": {"texture_max": 4096, "decimate_ratio": None, "triangle_budget": None},
+    "vrchat": {"texture_max": 2048, "decimate_ratio": None, "triangle_budget": 70_000},
+    "roblox": {"texture_max": 1024, "decimate_ratio": None, "triangle_budget": 20_000, "triangle_budget_scope": "per_mesh"},
+    "gltf-viewer": {"texture_max": 1024, "decimate_ratio": 0.6, "triangle_budget": None},
+    "quicklook": {"texture_max": 2048, "decimate_ratio": None, "triangle_budget": 100_000},
 }
 
 
@@ -1042,11 +1083,34 @@ def run(args):
     mesh_objs = [o for o in bpy.data.objects if o.type == "MESH"]
     before_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
 
+    # A preset's triangle_budget is an *absolute* count a real platform publishes (see PRESETS) --
+    # turned into an actual ratio further below, against this file's own real triangle count at
+    # decimation time, rather than shipped as a fixed fraction that couldn't guarantee compliance
+    # for an arbitrary input size. An explicit --decimate-ratio always wins over it, same as it
+    # already wins over a preset's own fixed decimate_ratio; already-within-budget is a no-op.
+    # "aggregate" scope (the default) computes one shared ratio from the whole file's combined
+    # triangle count, applied to every mesh object the same way -- correct for a platform that
+    # budgets a whole avatar/scene, not a per-part limit (VRChat, Quick Look). "per_mesh" scope
+    # instead clamps each mesh object independently against the same absolute number, using that
+    # object's own triangle count -- correct for a platform whose real limit is explicitly per
+    # individual mesh (Roblox): an aggregate ratio here would needlessly decimate two already-
+    # compliant meshes just because their *sum* crossed the budget, a case the real per-mesh limit
+    # never actually restricts (caught by review).
+    triangle_budget = (preset or {}).get("triangle_budget")
+    triangle_budget_scope = (preset or {}).get("triangle_budget_scope", "aggregate")
+
     welded_total = 0
     holes_filled_total = 0
     scales_fixed_total = 0
     points_thinned_total = 0
     warnings = []
+    # Topology-changing operations (--fill-holes adds real geometry; weld/triangulate can also
+    # change the real triangle count) run for every mesh object *before* any triangle_budget ratio
+    # is computed or applied -- a ratio computed from the pre-topology-change count could silently
+    # under-decimate once --fill-holes adds new triangles afterward, exceeding the platform's real
+    # budget despite this feature's own guarantee. Reproduced directly: a triangle_budget exactly
+    # equal to a hole-containing mesh's pre-fill-holes count (so no decimation looked necessary)
+    # still exported over budget once --fill-holes added its new face. Caught by review.
     for o in mesh_objs:
         point_thin_voxel = args.get("point_thin_voxel")
         if point_thin_voxel and point_thin_voxel > 0:
@@ -1066,9 +1130,21 @@ def run(args):
             o, weld=bool(args.get("weld_doubles")), triangulate=bool(args.get("triangulate")),
             recalc_normals=bool(args.get("recalc_normals")),
         )
-        if decimate_ratio and 0 < decimate_ratio < 1:
+
+    if args.get("decimate_ratio") is None and triangle_budget and triangle_budget_scope == "aggregate":
+        post_topology_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
+        decimate_ratio = triangle_budget / post_topology_tris if post_topology_tris > triangle_budget else None
+    for o in mesh_objs:
+        obj_decimate_ratio = decimate_ratio
+        if (
+            args.get("decimate_ratio") is None and triangle_budget
+            and triangle_budget_scope == "per_mesh"
+        ):
+            obj_tris = _compat.object_triangle_count(o)
+            obj_decimate_ratio = triangle_budget / obj_tris if obj_tris > triangle_budget else None
+        if obj_decimate_ratio and 0 < obj_decimate_ratio < 1:
             bpy.context.view_layer.objects.active = o
-            _decimate(o, decimate_ratio)
+            _decimate(o, obj_decimate_ratio)
         if args.get("origin") and args["origin"] != "keep":
             _set_origin(o, args["origin"])
 

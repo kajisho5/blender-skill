@@ -1216,6 +1216,92 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc2.returncode, 0, proc2.stderr)
         self.assertEqual(json.loads(proc2.stdout)["materials_merged"], [])
 
+    def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
+        # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published
+        # "individual meshes cannot exceed 20,000 triangles" (create.roblox.com/docs/art/
+        # modeling/specifications). --target-roblox's triangle_budget is converted into a real
+        # decimate ratio from this file's own actual triangle count, not a fixed fraction that
+        # couldn't guarantee compliance for an arbitrary input size.
+        out = self.out / "sphere_roblox.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "highpoly_sphere.blend"), "-o", str(out), "--target-roblox", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_before"], 20480)
+        self.assertLessEqual(data["triangles_after"], 20_000)
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertLessEqual(info["meshes"]["triangles"], 20_000)
+
+    def test_optimize_explicit_decimate_ratio_overrides_a_targets_triangle_budget(self):
+        # An explicit --decimate-ratio must win over --target-roblox's own budget-derived ratio,
+        # not just happen to produce a similar result: --decimate-ratio 0.9 on the same
+        # 20,480-triangle fixture gives exactly 20480*0.9 = 18432 -- a value the budget-derived
+        # ratio (20000/20480 ~= 0.9766) would never produce, proving the explicit value was
+        # actually used rather than silently ignored in favor of the target's own default.
+        out = self.out / "sphere_roblox_explicit_ratio.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "highpoly_sphere.blend"), "-o", str(out), "--target-roblox", "--decimate-ratio", "0.9", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_after"], 18432)
+
+    def test_optimize_target_roblox_never_decimates_two_individually_compliant_meshes(self):
+        # two_compliant_meshes.blend: SphereA/SphereB, 18,800 triangles each (individually under
+        # Roblox's real 20,000-triangle-*per-mesh* cap) but 37,600 combined. Roblox's own limit is
+        # explicitly per individual mesh, not a scene total -- summing before comparing (this
+        # feature's first version, shared with --target-vrchat/--target-quicklook, which really
+        # are whole-avatar/whole-scene budgets) would wrongly decimate both meshes down to fit a
+        # 20,000 *aggregate*, a case Roblox's real limit never actually restricts. Reproduced
+        # directly: reverting just the per-mesh fix decimates this fixture to 20,000 combined.
+        out = self.out / "two_compliant_roblox.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "two_compliant_meshes.blend"), "-o", str(out), "--target-roblox", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_before"], 37600)
+        self.assertEqual(data["triangles_after"], 37600)
+
+    def test_optimize_target_vrchat_recalculates_aggregate_budget_after_fill_holes(self):
+        # vrchat_boundary_hole.blend: a sphere with one real hole, 69,960 triangles as imported
+        # (just under VRChat's 70,000 aggregate budget -- an "aggregate" ratio computed from this
+        # pre-fill-holes count alone would conclude no decimation is needed at all). --fill-holes
+        # then adds enough geometry back to push the real total to 70,632, over budget -- a
+        # decision already made from the stale pre-fill-holes count never revisits that. Reproduced
+        # directly: reverting just this fix (computing the aggregate ratio from before_tris instead
+        # of the post-topology-change count) exports 70,632 triangles, over budget.
+        # (info.py's own verification is skipped here -- its self-intersection/thickness checks
+        # are prohibitively slow on a mesh this size, confirmed independently: over two minutes
+        # for a single run. optimize.py's own triangles_after is a directly measured count from
+        # the same real Blender data, not a guess, so it alone is sufficient here.)
+        out = self.out / "vrchat_boundary_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "vrchat_boundary_hole.blend"), "-o", str(out), "--target-vrchat", "--fill-holes", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["triangles_before"], 69960)
+        self.assertLessEqual(data["triangles_after"], 70_000)
+
+    def test_optimize_target_triangle_budget_is_a_noop_when_already_within_budget(self):
+        # The same 20,480-triangle fixture is well under --target-vrchat's 70,000 and
+        # --target-quicklook's 100,000 triangle_budget -- neither should decimate anything.
+        for target in ("vrchat", "quicklook"):
+            with self.subTest(target=target):
+                out = self.out / f"sphere_{target}.blend"
+                proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "highpoly_sphere.blend"), "-o", str(out), f"--target-{target}", "--json")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                data = json.loads(proc.stdout)
+                self.assertEqual(data["triangles_before"], data["triangles_after"])
+
+    def test_optimize_target_sketchfab_and_gltf_viewer_texture_caps(self):
+        # No official triangle cap on either target (both left un-decimated by design), but real
+        # texture-cap differences: sketchfab (4096, matching Sketchfab's own "1 to 4 4K textures"
+        # recommendation) vs gltf-viewer (1024, a lighter/faster-loading preset). Verified against
+        # box.glb's own texture -- both presets' texture_max exceed its actual size, so this
+        # confirms both flags parse and run cleanly end to end rather than the (trivial, no-op)
+        # resize itself.
+        for target in ("sketchfab", "gltf-viewer"):
+            with self.subTest(target=target):
+                out = self.out / f"box_{target}.glb"
+                proc = run("optimize.py", str(FIXTURE), "-o", str(out), f"--target-{target}", "--json")
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

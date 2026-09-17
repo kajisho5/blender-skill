@@ -21,6 +21,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --remove-unused-shape-keys
   python3 scripts/optimize.py model.glb -o model_optimized.glb --instance-duplicate-meshes
   python3 scripts/optimize.py model.glb -o model_optimized.glb --merge-materials
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --target-vrchat
 """
 import argparse
 import json
@@ -66,6 +67,11 @@ def main() -> int:
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
+    ap.add_argument("--target-sketchfab", action="store_const", dest="target", const="sketchfab", help="texture-max 4096 (Sketchfab's own recommendation is 1-4 4K textures), no decimation -- Sketchfab has no official triangle cap and is a display/hosting platform, not itself hardware-constrained")
+    ap.add_argument("--target-vrchat", action="store_const", dest="target", const="vrchat", help="triangle budget 70,000, applied to the whole file's combined mesh triangle total (VRChat's official PC 'Good' Performance Rank threshold, evaluated as an avatar's total triangle count across every mesh renderer combined), texture-max 2048 -- see creators.vrchat.com/avatars/avatar-performance-ranking-system; VRChat's own Quest/Android thresholds are much stricter (10,000 triangles for 'Good'), use --decimate-ratio/--texture-max directly if you need those instead")
+    ap.add_argument("--target-roblox", action="store_const", dest="target", const="roblox", help="triangle budget 20,000, applied to EACH mesh object independently (Roblox's official 'individual meshes cannot exceed 20,000 triangles' is a real per-mesh cap, not a scene total), texture-max 1024 (Roblox Studio's own diffuse/normal/roughness/metallic cap) -- see create.roblox.com/docs/art/modeling/specifications")
+    ap.add_argument("--target-gltf-viewer", action="store_const", dest="target", const="gltf-viewer", help="texture-max 1024, decimate-ratio 0.6 -- a lighter, faster-loading preset than --target-web for casual inspection in a generic web-based glTF viewer; no single platform publishes an official numeric spec for this category")
+    ap.add_argument("--target-quicklook", action="store_const", dest="target", const="quicklook", help="triangle budget 100,000, applied to the whole file's combined mesh triangle total, texture-max 2048 -- Apple's own published guidance for AR Quick Look/USDZ (developer.apple.com WWDC24 'Optimize your 3D assets for spatial computing'); also keep the exported file under 10MB for instant loading, not something this flag alone can guarantee")
     ap.add_argument("--draco", action="store_true", help="compress geometry with Draco (delegates to gltf-transform; glb/gltf output only)")
     ap.add_argument("--meshopt", action="store_true", help="compress geometry/animation with Meshopt (delegates to gltf-transform; glb/gltf output only; Blender itself cannot re-import the result -- see references/pitfalls.md)")
     ap.add_argument("--ktx2", action="store_true", help="compress textures to KTX2/Basis (delegates to gltf-transform + the KTX-Software `ktx` CLI; glb/gltf output only)")
