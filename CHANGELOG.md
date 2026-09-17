@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.20.0...blender-skill-v0.21.0) (2026-09-17)
+
+
+### Features
+
+* **optimize:** unused-bone removal and mobile bone budget cap (RM-034) ([#141](https://github.com/kajisho5/blender-skill/issues/141)) ([e8e5116](https://github.com/kajisho5/blender-skill/commit/e8e51169afd9412a2a27feb0ab8ed0a9d4c9777d))
+
 ## [0.20.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.19.0...blender-skill-v0.20.0) (2026-09-14)
 
 
