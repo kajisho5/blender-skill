@@ -1034,6 +1034,32 @@ class TestToolchain(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual(data["keyframe_points_after"], 2)
 
+    def test_optimize_remove_unused_shape_keys_resolves_a_dead_chain(self):
+        # shape_key_rig.blend: Basis, Real1 (real displacement from Basis), Dead1 (zero
+        # displacement from Basis), Dead2 (relative to Dead1, itself zero displacement), Real2
+        # (relative to Dead2, real displacement). Only Dead1/Dead2 are geometrically no-ops --
+        # Real1/Real2 must survive. Dead2's own max-displacement check only succeeds (rather than
+        # crashing on a dangling relative_key, or misreporting since Dead1's removal already
+        # happened by the time Dead2 is checked) if Blender's own auto-splice -- re-pointing
+        # Dead2 onto Dead1's own relative_key (Basis) the moment Dead1 is removed, verified
+        # directly against real Blender while building this feature -- actually took effect.
+        out = self.out / "shapekey_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "shape_key_rig.blend"), "-o", str(out), "--remove-unused-shape-keys", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(
+            sorted(s["shape_key"] for s in data["shape_keys_removed"]),
+            ["Dead1", "Dead2"],
+        )
+        for s in data["shape_keys_removed"]:
+            self.assertEqual(s["max_displacement"], 0.0)
+
+        # A second pass over the already-cleaned output must find nothing left to remove.
+        out2 = self.out / "shapekey_out2.blend"
+        proc2 = run("optimize.py", str(out), "-o", str(out2), "--remove-unused-shape-keys", "--json")
+        self.assertEqual(proc2.returncode, 0, proc2.stderr)
+        self.assertEqual(json.loads(proc2.stdout)["shape_keys_removed"], [])
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

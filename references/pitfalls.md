@@ -679,3 +679,21 @@ Blender's own glTF importer produces uses LINEAR interpolation (verified on fox.
 keyframe points) -- the `keyframe_curve.blend` test fixture was switched from Blender's default
 BEZIER to explicit LINEAR for the same reason, so its hand-computed expected RDP output stays
 exact rather than an approximation over curved segments.
+
+## Removing a shape key automatically re-points its dependents onto its own relative_key
+
+A shape key can be defined relative to another shape key instead of Basis (`key_block.
+relative_key`), so `--remove-unused-shape-keys` (RM-036) needed to know what happens to a shape
+key B that's relative to a shape key A, once A is removed for being geometrically dead (zero
+displacement from *its own* relative_key). Verified directly: `obj.shape_key_remove(A)` does not
+leave B's `relative_key` dangling or null -- Blender automatically re-points B onto A's own
+`relative_key` (in the simple case, Basis). This is exactly the "splice out a dead link and land
+its dependents on the next one up" behavior a hand-rolled implementation would otherwise need to
+build itself (compare `_remove_unused_bones`'s and `_cap_bone_count`'s own weight-transfer code
+for bones, which have no such built-in operator support). Because a *dead* key is by definition
+geometrically identical to whatever it's relative to, this re-pointing is always lossless here --
+B's absolute shape (its displacement from Basis, following the whole chain) is unchanged, only
+which key it's *directly* relative to moves up one link. `_remove_unused_shape_keys` still runs
+as a fixpoint loop (removing one link at a time and re-measuring), the same pattern as
+`_remove_unused_bones`, so a multi-level dead chain (A dead relative to Basis, B dead relative to
+A, C real relative to B) fully resolves in one call rather than leaving inner links behind.

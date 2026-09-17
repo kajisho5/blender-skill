@@ -18,6 +18,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
   python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
   python3 scripts/optimize.py model.glb -o model_optimized.glb --keyframe-decimate 0.01
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --remove-unused-shape-keys
 """
 import argparse
 import json
@@ -57,6 +58,7 @@ def main() -> int:
     ap.add_argument("--remove-unused-bones", action="store_true", help="prune every bone with zero skin-weight influence and no animation, from the leaves inward -- never touches a bone a still-used descendant needs, or one that's animated")
     ap.add_argument("--max-bones", type=int, metavar="N", help="reduce each armature to at most N bones (a real budget cap, e.g. for mobile skinning limits): removes the lowest-influence unanimated leaf bones first (including genuinely unused ones, for free), transferring each one's skin weight to its parent. Never removes an animated bone -- warns instead if the cap can't be reached without one.")
     ap.add_argument("--keyframe-decimate", type=float, metavar="TOLERANCE", help="reduce every action's keyframe count via Ramer-Douglas-Peucker curve simplification: a keyframe is dropped only if its own interpolation mode's real curve (LINEAR or CONSTANT only -- the two modes where the post-removal value is exactly computable) would deviate by at most TOLERANCE from its real value (in that fcurve's own units -- Blender units for location, radians for rotation, unitless for scale). A BEZIER-governed keyframe (Blender's own default for a hand-keyed action) or any other interpolation is never removed -- a glTF import is exclusively LINEAR, so this is not a hobbled feature for that common case. The first/last keyframe of every fcurve always survives. Must be a finite number > 0.")
+    ap.add_argument("--remove-unused-shape-keys", action="store_true", help="remove every non-Basis shape key whose maximum per-vertex displacement from whatever it's actually defined relative to (usually Basis, but a shape key can be defined relative to another shape key) is below a tiny fixed epsilon (1e-5, this file's own weld-doubles vertex-position precision) -- a shape key that geometrically does nothing no matter its value slider, mute state, or any driver pointed at it.")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -101,6 +103,7 @@ def main() -> int:
             "fix_colorspace": args.fix_colorspace, "texture_colorspace": args.texture_colorspace,
             "remove_unused_bones": args.remove_unused_bones, "max_bones": args.max_bones,
             "keyframe_decimate": args.keyframe_decimate,
+            "remove_unused_shape_keys": args.remove_unused_shape_keys,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -185,6 +188,8 @@ def main() -> int:
         if data["keyframe_points_before"]:
             kf_pct = (1 - data["keyframe_points_after"] / data["keyframe_points_before"]) * 100
             print(f"  keyframes: {data['keyframe_points_before']} -> {data['keyframe_points_after']} ({kf_pct:.0f}% reduction)")
+        if data["shape_keys_removed"]:
+            print(f"  removed {len(data['shape_keys_removed'])} unused shape key(s): {', '.join(s['shape_key'] for s in data['shape_keys_removed'])}")
         for d in data["delegated"]:
             print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
         for w in data.get("warnings", []):

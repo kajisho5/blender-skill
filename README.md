@@ -163,7 +163,14 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   action) is never touched, since approximating its real curve risks silently exceeding TOLERANCE
   (confirmed on a CONSTANT counterexample -- see `references/pitfalls.md`). A glTF import is
   exclusively LINEAR, so this isn't a hobbled feature for that common case. The first/last
-  keyframe of every fcurve always survives.
+  keyframe of every fcurve always survives. `--remove-unused-shape-keys` removes every non-Basis
+  shape key whose max per-vertex displacement from whatever it's actually defined relative to
+  (usually Basis, but a shape key can chain off another shape key instead) is below a tiny fixed
+  epsilon -- geometrically a no-op no matter its value slider, mute state, or any driver pointed
+  at it. A multi-level dead chain resolves correctly on its own: Blender's own
+  `obj.shape_key_remove()` automatically re-points every shape key that referenced the removed
+  one onto *its* relative_key (verified directly against real Blender), so removing a chain of
+  dead keys one at a time still lands every surviving key on the right base.
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a
