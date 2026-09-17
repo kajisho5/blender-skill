@@ -585,6 +585,64 @@ def _decimate_keyframes(tolerance: float) -> dict:
     }
 
 
+_SHAPE_KEY_EPSILON = 1e-5  # matches this file's own weld-doubles vertex-position precision
+
+
+def _shape_key_max_displacement(key_block) -> float:
+    """Max per-vertex Euclidean distance between this shape key's own point data and whatever
+    it's actually defined relative to (`relative_key` -- usually Basis, but a shape key can be
+    defined relative to another shape key instead) -- the real geometric contribution this key
+    adds, independent of its current `.value` slider or `.mute` state or any driver pointed at
+    it: a key that's geometrically identical to its relative_key does nothing no matter how it's
+    driven.
+    """
+    base = key_block.relative_key
+    max_d = 0.0
+    for kp, base_kp in zip(key_block.data, base.data):
+        d = (kp.co - base_kp.co).length
+        if d > max_d:
+            max_d = d
+    return max_d
+
+
+def _remove_unused_shape_keys(mesh_objs) -> list:
+    """Removes every non-Basis shape key whose max displacement from its own relative_key is
+    below a tiny fixed epsilon -- geometrically a no-op regardless of value/mute/drivers. Runs as
+    a fixpoint loop (see references/pitfalls.md's bone-pruning entry for why) since removing one
+    dead key can turn a *chain* relative to it into a newly-measurable-as-dead key too: Blender's
+    own obj.shape_key_remove() automatically re-points every shape key that referenced the removed
+    one's `relative_key` onto *its* relative_key (verified directly against real Blender), so a
+    multi-level dead chain resolves correctly without this function managing the chain itself.
+
+    Skips any mesh using Absolute shape keys (`Key.use_relative == False`) entirely: there,
+    `relative_key`/displacement isn't what actually drives the shape at all -- each key is a
+    timed sequence state selected by `eval_time`, interpolated against its *neighbors in the key
+    stack* (LINEAR/CARDINAL/CATMULL_ROM/BSPLINE), so a key that happens to be geometrically
+    identical to its relative_key can still be a real, load-bearing waypoint in that sequence's
+    shape. `shape_key_add()` sets `use_relative = True` by default (verified directly), so this
+    never affects a glTF import or any file whose shape keys were authored the normal way --
+    Absolute mode is an explicit, comparatively rare choice.
+    """
+    removed = []
+    for obj in mesh_objs:
+        sk = obj.data.shape_keys
+        if not sk or not sk.use_relative:
+            continue
+        reference = sk.reference_key
+        changed = True
+        while changed:
+            changed = False
+            for kb in list(sk.key_blocks):
+                if kb == reference:
+                    continue
+                d = _shape_key_max_displacement(kb)
+                if d <= _SHAPE_KEY_EPSILON:
+                    removed.append({"mesh": obj.name, "shape_key": kb.name, "max_displacement": d})
+                    obj.shape_key_remove(kb)
+                    changed = True
+    return removed
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -679,6 +737,10 @@ def run(args):
     if args.get("keyframe_decimate"):
         keyframes_decimated = _decimate_keyframes(args["keyframe_decimate"])
 
+    shape_keys_removed = []
+    if args.get("remove_unused_shape_keys"):
+        shape_keys_removed = _remove_unused_shape_keys(mesh_objs)
+
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
@@ -707,6 +769,7 @@ def run(args):
         "keyframe_points_before": keyframes_decimated["keyframe_points_before"],
         "keyframe_points_after": keyframes_decimated["keyframe_points_after"],
         "keyframes_decimated_by_action": keyframes_decimated["by_action"],
+        "shape_keys_removed": shape_keys_removed,
         "output_path": args["output"],
         "warnings": warnings,
     }
