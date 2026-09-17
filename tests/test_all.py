@@ -1189,6 +1189,24 @@ class TestToolchain(unittest.TestCase):
         info = json.loads(run("info.py", str(out), "--json").stdout)
         self.assertNotIn("ObjLinkMatB", info["materials"]["names"])
 
+    def test_optimize_merge_materials_reassigns_a_curve_objects_own_material_slot(self):
+        # material_curve_rig.blend: MeshObj (a mesh) and CurveObj (a Curve, not a Mesh) use two
+        # independently-authored but structurally-identical materials. A reassignment pass that
+        # only walked bpy.data.meshes (this feature's first version) would never touch
+        # CurveObj.data.materials -- Curve.materials is a real, separate material-slot list
+        # Blender gives every Curve/Text/MetaBall/GreasePencil/Volume datablock, not just Mesh --
+        # so bpy.data.materials.remove(dup) would have silently dropped the curve's material
+        # slot to None instead of reassigning it. Caught by review.
+        out = self.out / "material_curve_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "material_curve_rig.blend"), "-o", str(out), "--merge-materials", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["materials_merged"]), 1)
+        canonical = data["materials_merged"][0]["canonical_material"]
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(info["materials"]["names"], [canonical])
+
     def test_optimize_merge_materials_is_idempotent(self):
         out1 = self.out / "materials_pass1.blend"
         proc1 = run("optimize.py", str(ROOT / "tests" / "fixtures" / "materials_rig.blend"), "-o", str(out1), "--merge-materials", "--json")

@@ -186,11 +186,13 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   qualified: shared mesh data means shared shape-key/vertex-weight *state* in Blender's own data
   model, not just shared shape, so merging those could silently change animated behavior.
   `--merge-materials` merges every group of separate Material datablocks that are fully identical
-  onto one canonical datablock, reassigning every mesh-data material slot and every per-object
-  slot override that pointed at a duplicate before freeing it: every non-identity RNA property on
-  the Material itself, plus -- when `use_nodes` is on -- true node-tree structural equality (the
-  same node types/settings/socket values, and the exact same links between them, matched by node
-  name, not just a similar node count). An `Image`/`NodeTree`/other ID reference inside the graph
+  onto one canonical datablock, redirecting every real reference to a duplicate (Blender's own
+  `ID.user_remap` -- every mesh/curve/other data-block's material slot and every per-object slot
+  override in one call, not a hand-enumerated walk that could miss a user type) before freeing it:
+  every non-identity RNA property on the Material itself, plus -- when `use_nodes` is on -- true
+  node-tree structural equality (the same node types/settings/socket values, and the exact same
+  links between them, matched by node name, not just a similar node count). An `Image`/`NodeTree`/
+  other ID reference inside the graph
   (an Image Texture node's `.image`, a Group node's `.node_tree`, ...) is compared by datablock
   *identity*, not by name or pixel content -- two texture nodes pointing at separately-created but
   pixel-identical images are correctly left unmerged, since a real edit to one wouldn't reach the

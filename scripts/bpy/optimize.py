@@ -965,14 +965,15 @@ def _material_fully_identical(mat_a, mat_b) -> bool:
 
 
 def _reassign_material_users(dup, canonical) -> None:
-    for mesh in bpy.data.meshes:
-        for i, slot_mat in enumerate(mesh.materials):
-            if slot_mat == dup:
-                mesh.materials[i] = canonical
-    for obj in bpy.data.objects:
-        for slot in obj.material_slots:
-            if slot.link == "OBJECT" and slot.material == dup:
-                slot.material = canonical
+    """Redirects every reference to `dup` onto `canonical` via Blender's own `ID.user_remap` --
+    not a hand-enumerated walk of mesh.materials and OBJECT-linked object.material_slots (this
+    function's first version), which misses any *other* material user Blender's own data model
+    has (a Curve/Text/MetaBall/GreasePencil/Volume object's own `.materials` list, a node group
+    referencing this material, ...): `user_remap` covers every real ID user in one call, verified
+    directly to also correctly redirect an OBJECT-linked slot override (not just the common
+    DATA-linked case), leaving `dup.users == 0` afterward. Caught by review.
+    """
+    dup.user_remap(canonical)
 
 
 def _merge_identical_materials() -> list:

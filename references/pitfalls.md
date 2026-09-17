@@ -812,3 +812,19 @@ values, not the Python object's identity -- unlike an ID datablock such as an `I
 `NodeTree`, where identity genuinely is the right comparison (two texture nodes pointing at
 separately-created but pixel-identical images are correctly left unmerged, since editing one
 would never reach the other).
+
+## A material's own "users" are more than mesh.materials and OBJECT-linked object.material_slots -- use ID.user_remap, not a hand-enumerated walk
+
+`_reassign_material_users`'s first version walked `bpy.data.meshes` (each mesh's own
+`.materials` slot list) plus `bpy.data.objects`' OBJECT-linked `material_slots` overrides, then
+called `bpy.data.materials.remove(dup)`. That misses any *other* real material user Blender's
+own data model has: a `Curve`/`Text`/`MetaBall`/`GreasePencil`/`Volume` datablock has its own
+separate `.materials` slot list too, exactly like `Mesh.materials`, just never enumerated.
+Reproduced directly: a Curve object's material, structurally identical to a Mesh object's,
+still showed up in `curve_data.materials` completely unchanged after calling the old
+`_reassign_material_users` -- so `bpy.data.materials.remove(dup, do_unlink=True)` (the default)
+would have silently dropped the curve's material slot to `None` rather than reassigning it,
+losing a real material assignment on export. Caught by review; fixed by calling Blender's own
+`dup.user_remap(canonical)` instead of a hand-enumerated walk -- it redirects every real ID user
+in one call, verified to also correctly handle the OBJECT-linked slot-override case the old code
+special-cased, leaving `dup.users == 0` afterward either way.
