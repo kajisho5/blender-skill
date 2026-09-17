@@ -782,3 +782,33 @@ by review; fixed by also comparing each UV layer's `name`/`active_render` and ea
 attribute's `name`, plus the mesh-level `default_color_name`/`render_color_index` fallback
 (display-only `active_color_index` deliberately excluded -- it affects only what's shown in the
 UI's active-attribute indicator, nothing about how a material samples the mesh).
+
+## `bl_rna` marks a POINTER property "read-only" for a mutable nested struct too, not just for a fixed value
+
+`_merge_materials` (RM-038) needs true node-tree equality, so it walks every node's own RNA
+properties generically instead of hand-listing one comparison per node type. The first version
+skipped any property Blender reports `is_readonly` on the assumption that "read-only" means "not
+worth comparing, since it can't meaningfully differ between two otherwise-identical nodes" --
+true for a computed value like a node's `dimensions`, but not for `ShaderNodeValToRGB.color_ramp`
+or `ShaderNodeTexImage.image_user`: Blender marks the *property* read-only because you can't
+reassign which `ColorRamp`/`ImageUser` struct it points to, not because the struct's own fields
+(a Color Ramp's stops, an Image User's frame settings) are fixed -- those are freely mutable
+through the struct itself. Naively skipping every read-only property meant two Color Ramp nodes
+with completely different ramps compared as identical. Reproduced directly: two `ShaderNodeValToRGB`
+nodes, one with its first stop moved and recolored, still returned `True` from
+`_node_fully_identical` before the fix, and `False` after it -- confirmed both directions. Fixed
+by only skipping a read-only property when its *value* is a plain scalar/array, and walking a
+read-only pointer to a struct (recursively, since that struct's own properties can nest the same
+way) or a collection the same as any other nested value instead of skipping it.
+
+## Two separate nodes' own struct-typed properties are never `==`, even with identical field values
+
+A closely related trap in the same equality check: comparing `node_a.image_user == node_b.image_user`
+directly (rather than walking their fields) would *always* return `False` for two different
+nodes, even when every field inside matches -- Blender's `bpy_struct.__eq__` for a non-ID struct
+is a pointer/identity compare, and two separate nodes always own two separate struct instances.
+Handled by the same recursive walk as above: a nested non-ID struct's own value is its *fields'*
+values, not the Python object's identity -- unlike an ID datablock such as an `Image` or a
+`NodeTree`, where identity genuinely is the right comparison (two texture nodes pointing at
+separately-created but pixel-identical images are correctly left unmerged, since editing one
+would never reach the other).

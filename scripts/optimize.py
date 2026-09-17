@@ -20,6 +20,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --keyframe-decimate 0.01
   python3 scripts/optimize.py model.glb -o model_optimized.glb --remove-unused-shape-keys
   python3 scripts/optimize.py model.glb -o model_optimized.glb --instance-duplicate-meshes
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --merge-materials
 """
 import argparse
 import json
@@ -61,6 +62,7 @@ def main() -> int:
     ap.add_argument("--keyframe-decimate", type=float, metavar="TOLERANCE", help="reduce every action's keyframe count via Ramer-Douglas-Peucker curve simplification: a keyframe is dropped only if its own interpolation mode's real curve (LINEAR or CONSTANT only -- the two modes where the post-removal value is exactly computable) would deviate by at most TOLERANCE from its real value (in that fcurve's own units -- Blender units for location, radians for rotation, unitless for scale). A BEZIER-governed keyframe (Blender's own default for a hand-keyed action) or any other interpolation is never removed -- a glTF import is exclusively LINEAR, so this is not a hobbled feature for that common case. The first/last keyframe of every fcurve always survives. Must be a finite number > 0.")
     ap.add_argument("--remove-unused-shape-keys", action="store_true", help="remove every non-Basis shape key whose maximum per-vertex displacement from whatever it's actually defined relative to (usually Basis, but a shape key can be defined relative to another shape key) is below a tiny fixed epsilon (1e-5, this file's own weld-doubles vertex-position precision) -- a shape key that geometrically does nothing no matter its value slider, mute state, or any driver pointed at it.")
     ap.add_argument("--instance-duplicate-meshes", action="store_true", help="merge every group of mesh objects on separate datablocks that are fully identical (exact vertex positions/face topology/UVs/vertex colors, and the exact same Material datablocks -- not just similarly shaped, see info.py's own duplicate_mesh_candidates for that looser suggestion) onto one shared datablock, freeing the now-orphaned duplicates. Never touches a mesh with shape keys or an Armature modifier, since shared mesh data means shared shape-key/vertex-weight state in Blender's own data model.")
+    ap.add_argument("--merge-materials", action="store_true", help="merge every group of separate Material datablocks that are fully identical (every material property, and -- when use_nodes is on -- the exact same node graph: same node types/settings/socket values and the same links between them, not just a similar node count) onto one canonical datablock, freeing the now-orphaned duplicates. A material referencing a shared node group (ShaderNodeGroup) only matches another using the exact same node-group datablock, not a separately-authored but structurally-identical one.")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -107,6 +109,7 @@ def main() -> int:
             "keyframe_decimate": args.keyframe_decimate,
             "remove_unused_shape_keys": args.remove_unused_shape_keys,
             "instance_duplicate_meshes": args.instance_duplicate_meshes,
+            "merge_materials": args.merge_materials,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -195,6 +198,8 @@ def main() -> int:
             print(f"  removed {len(data['shape_keys_removed'])} unused shape key(s): {', '.join(s['shape_key'] for s in data['shape_keys_removed'])}")
         for g in data["meshes_instanced"]:
             print(f"  instanced {', '.join(g['merged_objects'])} onto {g['canonical_mesh']} ({len(g['datablocks_removed'])} datablock(s) freed)")
+        for g in data["materials_merged"]:
+            print(f"  merged material(s) {', '.join(g['merged_materials'])} onto {g['canonical_material']}")
         for d in data["delegated"]:
             print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
         for w in data.get("warnings", []):
