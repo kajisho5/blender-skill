@@ -951,6 +951,89 @@ class TestToolchain(unittest.TestCase):
         proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "sparse_rig.blend"), "-o", str(out), "--max-bones", "0", "--json")
         self.assertNotEqual(proc.returncode, 0)
 
+    def test_optimize_keyframe_decimate_matches_hand_computed_rdp_result(self):
+        # keyframe_curve.blend: a single location.x fcurve with 7 keyframes:
+        #   (0,0.0) (5,0.5) (10,1.0) (15,3.0) (20,1.0) (25,1.0) (30,1.0)
+        # Worked out by hand (see references/pitfalls.md): at tolerance 0.1, RDP keeps
+        # frames 0, 10, 15, 20, 30 and drops 5 (exactly on the 0->10 line) and 25 (exactly on
+        # the flat 20->30 line) -- 7 -> 5 keyframes.
+        out = self.out / "curve_decimated.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "keyframe_curve.blend"), "-o", str(out), "--keyframe-decimate", "0.1", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["keyframe_points_before"], 7)
+        self.assertEqual(data["keyframe_points_after"], 5)
+        self.assertEqual(data["keyframes_decimated_by_action"], [{"action": "CurveTest", "keyframe_points_before": 7, "keyframe_points_after": 5}])
+
+    def test_optimize_keyframe_decimate_large_tolerance_keeps_only_endpoints(self):
+        out = self.out / "curve_hightol.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "keyframe_curve.blend"), "-o", str(out), "--keyframe-decimate", "10", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["keyframe_points_after"], 2)  # first/last always survive
+
+    def test_optimize_keyframe_decimate_preserves_animation_bounds_on_a_real_character(self):
+        # fox.glb has three real animations (Run/Survey/Walk) with distinct frame ranges --
+        # decimating must shrink keyframe count without moving any action's start/end frame,
+        # since the first/last keyframe of every fcurve is always protected. Compared against a
+        # plain optimize.py pass-through (no --keyframe-decimate) on the same file, not against
+        # the original fox.glb directly: optimize.py's own default (non-multi-action) glTF
+        # export already truncates Run's fractional last frame (27.8 -> 27.0) with no decimation
+        # involved at all -- a pre-existing export quirk (see references/pitfalls.md), not
+        # something this feature should be blamed for or is expected to preserve.
+        passthrough_out = self.out / "fox_passthrough.glb"
+        proc0 = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(passthrough_out), "--json")
+        self.assertEqual(proc0.returncode, 0, proc0.stderr)
+        before_info = json.loads(run("info.py", str(passthrough_out), "--json").stdout)
+
+        out = self.out / "fox_decimated.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--keyframe-decimate", "0.01", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertLess(data["keyframe_points_after"], data["keyframe_points_before"])
+
+        after_info = json.loads(run("info.py", str(out), "--json").stdout)
+        before_by_name = {a["name"]: a for a in before_info["animations"]}
+        after_by_name = {a["name"]: a for a in after_info["animations"]}
+        self.assertEqual(set(before_by_name), set(after_by_name))
+        for name, before_anim in before_by_name.items():
+            after_anim = after_by_name[name]
+            self.assertEqual(before_anim["frame_start"], after_anim["frame_start"])
+            self.assertEqual(before_anim["frame_end"], after_anim["frame_end"])
+
+    def test_optimize_rejects_non_positive_keyframe_decimate(self):
+        out = self.out / "bad_kf.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "keyframe_curve.blend"), "-o", str(out), "--keyframe-decimate", "0", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_optimize_rejects_nan_keyframe_decimate(self):
+        # A straight `<= 0` check lets NaN through (`nan <= 0` is False) -- caught by review.
+        out = self.out / "bad_kf_nan.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "keyframe_curve.blend"), "-o", str(out), "--keyframe-decimate", "nan", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_optimize_keyframe_decimate_never_exceeds_tolerance_on_a_constant_curve(self):
+        # constant_curve.blend: (0,0.0) (5,1.0) (10,1.0), CONSTANT interpolation throughout.
+        # A straight-line error estimate at frame 5 is |1.0-0.5|=0.5 -- under tolerance 0.75, so
+        # a version that assumed linear interpolation would wrongly remove it. The real
+        # CONSTANT-governed curve holds 0.0 from frame 0 to 10, so the true error is |1.0-0.0|=
+        # 1.0 -- frame 5 must survive at any tolerance below 1.0 (caught by review; see
+        # references/pitfalls.md for the full worked example).
+        out = self.out / "const_low_tol.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "constant_curve.blend"), "-o", str(out), "--keyframe-decimate", "0.75", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["keyframe_points_after"], 3)  # frame 5 protected, nothing removed
+
+    def test_optimize_keyframe_decimate_removes_a_constant_keyframe_once_true_error_fits(self):
+        # Same curve, but tolerance 1.5 is above the *real* CONSTANT error (1.0) -- frame 5 is
+        # correctly removed once the exact (not straight-line) error is what's being measured.
+        out = self.out / "const_high_tol.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "constant_curve.blend"), "-o", str(out), "--keyframe-decimate", "1.5", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["keyframe_points_after"], 2)
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

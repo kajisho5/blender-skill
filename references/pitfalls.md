@@ -641,3 +641,41 @@ exercised, because the sparse_rig.blend fixture happened not to hit any of these
   bone with a quote or backslash in its name would silently fail the `in animated` check and
   become removable. Fixed with an escape-aware capture (`(?:\\.|[^"\\])*`) followed by
   `bpy.utils.unescape_identifier()` to reverse Blender's own escaping before comparing.
+
+## A fractional last keyframe can get truncated to an integer frame on glTF export, with no decimation involved
+
+Verified on fox.glb's own "Run" animation, whose real last keyframe sits at frame 27.8 (not a
+round number -- Khronos's sample assets aren't always authored on whole frames). A plain
+`optimize.py fox.glb -o out.glb` with **no** flags at all (`--keyframe-decimate` included)
+re-exports it with `frame_end` truncated to 27.0 -- `info.py`'s reported animation duration
+shrinks accordingly. This is `optimize.py`'s own default (non-multi-action) glTF export path
+rounding/clamping frame bounds, not a bug introduced by `--keyframe-decimate` (RM-035): a test
+comparing `--keyframe-decimate`'s before/after animation bounds has to diff against a plain
+pass-through export of the same file through the same export path, not against the original
+source file, or it flags this pre-existing, unrelated quirk as a regression. Not yet root-caused
+further (which exact export kwarg governs it) or fixed -- filed here so it isn't rediscovered
+from scratch and isn't confused with a `--keyframe-decimate` correctness bug.
+
+## Measuring keyframe-removal error against a straight line is only exact for LINEAR interpolation
+
+`--keyframe-decimate`'s first version (RM-035) measured every candidate keyframe's removal error
+against the *straight line* between its two surviving neighbors, regardless of which
+interpolation mode actually governs that segment in Blender. That's exact for `LINEAR`, but
+wrong for `CONSTANT`: a CONSTANT-governed segment holds its *starting* keyframe's value flat
+right up to the next keyframe, not a ramp. Caught by review with this exact counterexample: a
+CONSTANT curve `(0, 0.0)`, `(5, 1.0)`, `(10, 1.0)` and `--keyframe-decimate 0.75`. The
+straight-line estimate at frame 5 is `|1.0 - 0.5| = 0.5` (under the 0.75 tolerance, so the old
+code removed it) -- but the *real* post-removal curve holds `0.0` from frame 0 to frame 10 under
+CONSTANT interpolation, so the actual error at frame 5 is `|1.0 - 0.0| = 1.0`, nearly double what
+was promised. Fixed by computing the exact value for `LINEAR` and `CONSTANT` segments (a
+straight line and a flat step, respectively -- both cheap, closed-form) and, for every other
+interpolation mode (`BEZIER` -- Blender's own default for a hand-keyed action -- and the named
+easing curves), never removing anything in that segment at all: reproducing Blender's real
+Bezier evaluation (frame is itself a cubic function of the curve parameter, via each keyframe's
+own handle positions) precisely enough to still guarantee the requested tolerance is out of
+scope, and guessing risks silently exceeding it the same way the straight-line estimate did for
+CONSTANT. Not a hobbled feature for this skill's primary real input, though: every fcurve
+Blender's own glTF importer produces uses LINEAR interpolation (verified on fox.glb, all 10458
+keyframe points) -- the `keyframe_curve.blend` test fixture was switched from Blender's default
+BEZIER to explicit LINEAR for the same reason, so its hand-computed expected RDP output stays
+exact rather than an approximation over curved segments.
