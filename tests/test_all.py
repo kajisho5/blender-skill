@@ -1072,6 +1072,34 @@ class TestToolchain(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual(data["shape_keys_removed"], [])
 
+    def test_optimize_instance_duplicate_meshes_merges_only_truly_identical_copies(self):
+        # instancing_rig.blend: CubeA1/A2/A3 are three separate-datablock but fully identical
+        # cube copies -- must merge onto one shared datablock. CubeB1/B2 share the same
+        # vertex/triangle/area/volume/bbox signature info.py's own loose duplicate_mesh_candidates
+        # heuristic would flag, but B2's UVs are shifted -- must NOT merge (proving this check is
+        # stricter than that suggestion-only fingerprint). CubeC1/C2 are geometrically identical
+        # but have shape keys -- must NOT merge (shared mesh data means shared shape-key state in
+        # Blender's own data model). Sphere has no duplicate at all.
+        out = self.out / "instanced_out.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "instancing_rig.blend"), "-o", str(out), "--instance-duplicate-meshes", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["meshes_instanced"]), 1)
+        group = data["meshes_instanced"][0]
+        self.assertEqual(group["canonical_objects"], ["CubeA1"])
+        self.assertEqual(sorted(group["merged_objects"]), ["CubeA2", "CubeA3"])
+        self.assertEqual(len(group["datablocks_removed"]), 2)
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        already_instanced = info["instancing"]["already_instanced"]
+        self.assertEqual(len(already_instanced), 1)
+        self.assertEqual(sorted(already_instanced[0]["objects"]), ["CubeA1", "CubeA2", "CubeA3"])
+        # B (different UVs) and C (shape-keyed) still show up as separate-datablock candidates
+        # by info.py's own loose signature -- proving they were never merged.
+        candidates = info["instancing"]["duplicate_mesh_candidates"][0]["objects"]
+        for name in ("CubeB1", "CubeB2", "CubeC1", "CubeC2"):
+            self.assertIn(name, candidates)
+
     def test_optimize_decimates_to_requested_ratio(self):
         out = self.out / "box_opt.glb"
         proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--decimate-ratio", "0.5", "--json")

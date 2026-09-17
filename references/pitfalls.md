@@ -714,3 +714,35 @@ whose `Key.use_relative` is `False` entirely -- verified on a purpose-built fixt
 (`absolute_shape_key_rig.blend`: Basis, a geometrically-identical-to-Basis `StateA`, and a real
 `StateB`, with `use_relative = False`) two ways: with the guard, nothing is removed; reverting
 just the guard reproduces the bug exactly, removing `StateA`.
+
+## Sharing mesh data means sharing more than geometry: shape-key state and vertex weights too
+
+`--instance-duplicate-meshes` (RM-037) merges mesh objects onto one shared datablock when
+proven fully identical -- but "fully identical geometry" isn't the same question as "safe to
+share data". Two real Blender data-model facts made this feature need to *exclude* certain
+objects outright, not just check them for equality:
+
+- A shape key's *value* (the blend-weight slider) is a property of the `ShapeKey`, which lives
+  in the mesh's shared `Key` datablock -- not the object. Two objects that share one mesh
+  therefore share one Key datablock, and so share the *same current shape-key values* too. Two
+  geometrically-identical props that happen to have their shape keys posed differently right now
+  would have that difference silently erased if merged.
+- A vertex's bone-weight assignments (`MeshVertex.groups`) live on the mesh's own vertex data,
+  not the object -- only the *definitions* (`Object.vertex_groups`, the named groups themselves)
+  are per-object. Two skinned objects sharing one mesh would be forced to carry identical weight
+  assignments even if their `vertex_groups` lists differ.
+
+Both are excluded from instancing candidacy entirely (`_mesh_is_animatable`), regardless of what
+a geometry-equality check would otherwise conclude, rather than trying to detect "would this
+particular merge actually change anything" case by case.
+
+Separately: info.py's own `duplicate_mesh_candidates` (RM-015) uses a deliberately loose,
+rotation/translation-invariant fingerprint (vertex/triangle count, area, volume, sorted bbox
+dims) appropriate for a human-reviewed *suggestion* -- it's not safe grounds for an *automatic*
+merge, since two meshes can match all five of those numbers while differing in UVs, vertex
+colors, or which Material datablocks they reference. `_mesh_fully_identical` checks real,
+literal equality (indexed vertex positions, face topology, every UV/color-attribute value, and
+the same Material datablock references) instead. Verified on a purpose-built fixture
+(`instancing_rig.blend`): two cubes matching the loose signature exactly, differing only by a
+shifted UV layer, are correctly left unmerged -- the loose fingerprint alone would have flagged
+them as a merge candidate.
