@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.24.0...blender-skill-v0.25.0) (2026-09-17)
+
+
+### Features
+
+* **optimize:** merge fully-identical duplicate materials (RM-038) ([#149](https://github.com/kajisho5/blender-skill/issues/149)) ([50acf32](https://github.com/kajisho5/blender-skill/commit/50acf3227506081b979c15f9f861339a0d369897))
+
 ## [0.24.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.23.0...blender-skill-v0.24.0) (2026-09-17)
 
 
