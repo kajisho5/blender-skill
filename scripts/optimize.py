@@ -52,6 +52,8 @@ def main() -> int:
     ap.add_argument("--webp-quality", type=int, metavar="0-100", help="WebP encode quality (default 75, Blender's own default); only used with --webp")
     ap.add_argument("--fix-colorspace", action="store_true", help="correct every texture colorspace mismatch info.py flags (Base Color/Emission not 'sRGB'; Metallic/Roughness/Alpha/a normal map's texture not 'Non-Color') based on which material socket it feeds")
     ap.add_argument("--texture-colorspace", metavar="NAME", help="force every texture's colorspace tag to NAME regardless of role (e.g. 'ACEScg', 'ACES2065-1', 'sRGB', 'Non-Color') -- a blunt override, not per-socket correction; see --fix-colorspace for that. Rejected together with --fix-colorspace.")
+    ap.add_argument("--remove-unused-bones", action="store_true", help="prune every bone with zero skin-weight influence and no animation, from the leaves inward -- never touches a bone a still-used descendant needs, or one that's animated")
+    ap.add_argument("--max-bones", type=int, metavar="N", help="reduce each armature to at most N bones (a real budget cap, e.g. for mobile skinning limits): removes the lowest-influence unanimated leaf bones first (including genuinely unused ones, for free), transferring each one's skin weight to its parent. Never removes an animated bone -- warns instead if the cap can't be reached without one.")
     ap.add_argument("--target-web", action="store_const", dest="target", const="web")
     ap.add_argument("--target-mobile", action="store_const", dest="target", const="mobile")
     ap.add_argument("--target-ar", action="store_const", dest="target", const="ar")
@@ -78,6 +80,8 @@ def main() -> int:
             raise SkillError("--draco/--meshopt/--ktx2 need a glb/gltf output (gltf-transform doesn't operate on other formats)", kind="input")
         if args.webp and out_fmt != "gltf":
             raise SkillError("--webp needs a glb/gltf output (EXT_texture_webp is a glTF extension)", kind="input")
+        if args.max_bones is not None and args.max_bones < 1:
+            raise SkillError("--max-bones must be at least 1", kind="input")
 
         bpy_args = {
             "path": str(in_path.resolve()), "format": in_fmt,
@@ -90,6 +94,7 @@ def main() -> int:
             "point_thin_voxel": args.point_thin_voxel,
             "webp": args.webp, "webp_quality": args.webp_quality,
             "fix_colorspace": args.fix_colorspace, "texture_colorspace": args.texture_colorspace,
+            "remove_unused_bones": args.remove_unused_bones, "max_bones": args.max_bones,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -166,6 +171,11 @@ def main() -> int:
             print(f"  fixed colorspace on {data['colorspace_fixed']} texture reference(s)")
         if data["texture_colorspace_changed"]:
             print(f"  set colorspace to {args.texture_colorspace!r} on: {', '.join(data['texture_colorspace_changed'])}")
+        if data["bones_removed"]:
+            print(f"  removed {len(data['bones_removed'])} unused bone(s): {', '.join(data['bones_removed'])}")
+        if data["bones_demoted"]:
+            for d in data["bones_demoted"]:
+                print(f"  bone {d['bone']} removed, weight reassigned to {d['reassigned_to']}")
         for d in data["delegated"]:
             print(f"  {d['tool']}: ok" if d["ran"] else f"  {d['tool']}: skipped ({d['reason']})")
         for w in data.get("warnings", []):

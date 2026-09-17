@@ -569,3 +569,21 @@ came out above its actual size and was correctly left untouched. A file with exa
 object degenerates cleanly to fraction 1.0 (that object's own bounding box IS the whole scene's),
 capping its textures at the full assumed viewport width -- the sensible default for a single
 hero asset with no other objects to be smaller than.
+
+## Pruning dead leaf bones needs a fixpoint loop, not one pass
+
+`optimize.py --remove-unused-bones` (RM-034) only ever removes a bone with no children (a leaf)
+and zero skin-weight influence and no fcurve animation -- a bone with a still-present child is
+never touched, even if that bone itself carries no weight, since a structural ancestor might
+still be needed to position a used descendant. That means a *chain* of two or more genuinely dead
+bones (e.g. `Used -> Dead1 -> Dead2`, both unweighted and unanimated) can't be fully pruned in a
+single pass: on pass one only `Dead2` is a leaf and qualifies; only after it's gone does `Dead1`
+become a leaf itself. `_remove_unused_bones()` re-scans the influence map and re-collects the
+leaf set after every removal (`while changed: ...`) rather than computing candidates once up
+front, so a chain of any depth is fully cleared in one call. `sparse_rig.blend`'s own fixture
+(`Head -> HeadTip`, `Arm1 -> Arm1Tip`, each dead bone one level deep and already a leaf on pass
+one) doesn't exercise the multi-level case -- it just confirms the base leaf+zero-influence+
+unanimated check. `--max-bones N`'s `_cap_bone_count()` needs the same re-scan per bone it
+removes too, since capping to a hard count means every subsequent victim has to be picked from
+whatever the *current* leaf set is, not a stale one computed before earlier removals changed the
+tree's shape.

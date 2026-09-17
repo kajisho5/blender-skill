@@ -8,6 +8,7 @@ armature input's reported triangles_before/triangles_after were inflated by the 
 triangles (confirmed on fox.glb: 656 instead of the real 576), and --texture-auto-resolution's
 scene-bounding-box calculation would be skewed by an object that isn't really part of the asset.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -325,6 +326,129 @@ def _set_all_colorspace(name: str) -> list:
     return changed
 
 
+def _bone_influence(armature_obj, mesh_objs) -> dict:
+    """bone name -> total vertex-weight sum across every mesh actually skinned to this armature
+    (has an Armature modifier pointing at it) -- how much real skinning influence that bone has,
+    not just whether a same-named vertex group happens to exist."""
+    influence = {}
+    for obj in mesh_objs:
+        if not any(m.type == "ARMATURE" and m.object == armature_obj for m in obj.modifiers):
+            continue
+        for vg in obj.vertex_groups:
+            total = 0.0
+            for v in obj.data.vertices:
+                for g in v.groups:
+                    if g.group == vg.index:
+                        total += g.weight
+            if total:
+                influence[vg.name] = influence.get(vg.name, 0.0) + total
+    return influence
+
+
+def _animated_bone_names() -> set:
+    """Every bone name targeted by a pose-bone F-curve in any action in the file (not just the
+    active one) -- reusing the same 'pose.bones["Name"].prop' path pattern info.py's own
+    root-motion detection matches, so a bone actually driving visible motion is never treated as
+    safe to remove just because it happens to carry little or no skin weight."""
+    names = set()
+    for action in bpy.data.actions:
+        for fc in action.fcurves:
+            m = re.match(r'pose\.bones\["([^"]+)"\]', fc.data_path)
+            if m:
+                names.add(m.group(1))
+    return names
+
+
+def _transfer_bone_weight_to_parent(mesh_objs, armature_obj, bone_name: str, parent_name) -> None:
+    """Moves a removed bone's own vertex-group weight onto its parent's vertex group (creating
+    one if the parent had none) rather than just dropping it -- a vertex that was influenced by
+    the removed bone stays attached to the rig, following the parent instead, rather than losing
+    that influence outright. With no parent (removing a root bone), the weight is simply
+    discarded -- there is nothing left in the chain to reattach it to.
+    """
+    for obj in mesh_objs:
+        if not any(m.type == "ARMATURE" and m.object == armature_obj for m in obj.modifiers):
+            continue
+        vg_old = obj.vertex_groups.get(bone_name)
+        if vg_old is None:
+            continue
+        if parent_name:
+            vg_new = obj.vertex_groups.get(parent_name) or obj.vertex_groups.new(name=parent_name)
+            for v in obj.data.vertices:
+                for g in v.groups:
+                    if g.group == vg_old.index and g.weight > 0:
+                        vg_new.add([v.index], g.weight, 'ADD')
+        obj.vertex_groups.remove(vg_old)
+
+
+def _remove_unused_bones(armature_obj, mesh_objs) -> list:
+    """Iteratively prunes leaf bones with zero skin-weight influence and no animation, from the
+    leaves inward -- a bone only becomes eligible once its own children are gone too, so a bone
+    that's only a structural parent of a still-used descendant is never orphaned out from under
+    it. Genuinely dead weight (no mesh references it, nothing animates it): safe to drop outright
+    (no vertex depends on it, so there is nothing to transfer), unlike _cap_bone_count's more
+    aggressive reduction. Returns the removed bone names.
+    """
+    animated = _animated_bone_names()
+    removed = []
+    bpy.context.view_layer.objects.active = armature_obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    changed = True
+    while changed:
+        changed = False
+        influence = _bone_influence(armature_obj, mesh_objs)
+        for eb in list(armature_obj.data.edit_bones):
+            if eb.children:
+                continue
+            if influence.get(eb.name, 0.0) > 1e-6 or eb.name in animated:
+                continue
+            removed.append(eb.name)
+            armature_obj.data.edit_bones.remove(eb)
+            changed = True
+    bpy.ops.object.mode_set(mode='OBJECT')
+    for name in removed:
+        for obj in mesh_objs:
+            vg = obj.vertex_groups.get(name)
+            if vg:
+                obj.vertex_groups.remove(vg)
+    return removed
+
+
+def _cap_bone_count(armature_obj, mesh_objs, max_bones: int):
+    """Reduces this armature to at most max_bones by repeatedly removing the lowest-skin-
+    influence *unanimated* leaf bone and transferring its weight to its parent (see
+    _transfer_bone_weight_to_parent) -- a real, mobile-engine-style bone-budget cap, not just
+    info.py-style reporting. Genuinely unused bones (zero influence) always sort first and get
+    removed for free before any meaningfully-weighted bone is touched. Never removes a bone with
+    its own animation, even if the cap can't be reached without one -- returns a warning instead
+    of silently breaking visible motion to hit an exact number.
+    """
+    demoted = []
+    warning = None
+    while len(armature_obj.data.bones) > max_bones:
+        animated = _animated_bone_names()
+        bpy.context.view_layer.objects.active = armature_obj
+        bpy.ops.object.mode_set(mode='EDIT')
+        candidates = [eb for eb in armature_obj.data.edit_bones if not eb.children and eb.name not in animated]
+        if not candidates:
+            bpy.ops.object.mode_set(mode='OBJECT')
+            warning = (
+                f"{armature_obj.name}: could not reduce to {max_bones} bones without removing an "
+                f"animated bone -- stopped at {len(armature_obj.data.bones)}"
+            )
+            break
+        influence = _bone_influence(armature_obj, mesh_objs)
+        candidates.sort(key=lambda eb: influence.get(eb.name, 0.0))
+        victim = candidates[0]
+        victim_name = victim.name
+        parent_name = victim.parent.name if victim.parent else None
+        armature_obj.data.edit_bones.remove(victim)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        _transfer_bone_weight_to_parent(mesh_objs, armature_obj, victim_name, parent_name)
+        demoted.append({"bone": victim_name, "reassigned_to": parent_name})
+    return demoted, warning
+
+
 def _purge_unused() -> int:
     before = sum(len(getattr(bpy.data, coll)) for coll in
                  ("meshes", "materials", "images", "actions", "armatures", "cameras", "lights"))
@@ -396,6 +520,19 @@ def run(args):
     if args.get("texture_colorspace"):
         texture_colorspace_changed = _set_all_colorspace(args["texture_colorspace"])
 
+    bones_removed = []
+    bones_demoted = []
+    if args.get("remove_unused_bones") or args.get("max_bones"):
+        for arm in [o for o in bpy.data.objects if o.type == "ARMATURE"]:
+            skinned = [o for o in mesh_objs if any(m.type == "ARMATURE" and m.object == arm for m in o.modifiers)]
+            if args.get("remove_unused_bones"):
+                bones_removed.extend(_remove_unused_bones(arm, skinned))
+            if args.get("max_bones"):
+                demoted, bone_warning = _cap_bone_count(arm, skinned, args["max_bones"])
+                bones_demoted.extend(demoted)
+                if bone_warning:
+                    warnings.append(bone_warning)
+
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
@@ -419,6 +556,8 @@ def run(args):
         "orphan_data_purged": purged,
         "colorspace_fixed": colorspace_fixed,
         "texture_colorspace_changed": texture_colorspace_changed,
+        "bones_removed": bones_removed,
+        "bones_demoted": bones_demoted,
         "output_path": args["output"],
         "warnings": warnings,
     }
