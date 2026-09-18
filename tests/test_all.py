@@ -1368,6 +1368,31 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(data["psnr"], 100.0)
         self.assertEqual(data["ssim"], 1.0)
 
+    def test_look_compare_prints_the_score_in_text_mode(self):
+        # Every other --compare test above passes --json, so scripts/look.py's own non-JSON text
+        # branch (main()'s `if "psnr" in data: print(f"  psnr: ...")`) was never actually
+        # exercised -- a regression in that f-string's formatting would have passed unnoticed.
+        black = self.out / "black_text.png"
+        white = self.out / "white_text.png"
+        _write_solid_png(black, 8, 8, (0, 0, 0))
+        _write_solid_png(white, 8, 8, (255, 255, 255))
+        out = self.out / "cmp_text.png"
+        proc = run("look.py", "--compare", str(black), str(white), "-o", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"wrote {out} (compare)", proc.stdout)
+        self.assertIn("psnr: 0.00 dB, ssim: 0.0001", proc.stdout)
+
+    def test_look_compare_prints_the_skip_reason_in_text_mode(self):
+        small = self.out / "small_text.png"
+        big = self.out / "big_text.png"
+        _write_solid_png(small, 4, 4, (10, 10, 10))
+        _write_solid_png(big, 8, 8, (10, 10, 10))
+        out = self.out / "cmp_text_skip.png"
+        proc = run("look.py", "--compare", str(small), str(big), "-o", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"wrote {out} (compare)", proc.stdout)
+        self.assertIn("score: skipped (images have different pixel dimensions, cannot score)", proc.stdout)
+
     def test_look_compare_skips_the_score_for_mismatched_dimensions(self):
         # PSNR/SSIM are only defined pixel-for-pixel -- comparing a 4x4 to an 8x8 must report why
         # no score was computed instead of silently scoring the two images after --compare's own
