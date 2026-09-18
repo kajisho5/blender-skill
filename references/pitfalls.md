@@ -937,15 +937,30 @@ genuinely zero-area face (three well-separated, merely collinear points -- mecha
 gated by `dist` at all) exactly as before. Fixed by using `dist=0.0`, disabling only the
 short-edge-collapse mechanism this feature never needed. Caught by review.
 
-## Vertex-cache ACMR is computed on Blender's own welded topology, not the real exported vertex buffer
+## Vertex-cache ACMR is computed on Blender's own current mesh topology, not the real exported vertex buffer
 
 `--vertex-cache-report`'s ACMR (Average Cache Miss Ratio) simulation walks a temporary bmesh's
-current triangle order -- Blender's own internal, per-position (welded) vertex representation.
-A real glTF/FBX export does not use that same vertex buffer: it duplicates a vertex at every
-hard-edge/UV-seam discontinuity (split normals, a UV seam, a per-face-corner color), so the
-*actual* GPU-submitted index buffer for the exported file has more distinct vertex entries -- and
-therefore a real ACMR this report does not measure. Treat this metric as a relative signal for
-this tool's own triangle-order changes (did `--clean-mesh`/`--weld-doubles`/decimation improve or
-worsen cache locality on the mesh as authored), not a prediction of the exported file's real
-GPU cache behavior -- `--meshopt` (gltf-transform's own `reorder`, operating on the real exported
-index buffer) is the thing that actually optimizes for that.
+current triangle order -- one BMVert per mesh vertex exactly as `bm.from_mesh(obj.data)` reflects
+it, doing no deduplication/welding of its own (an earlier version of this note called it "welded",
+which overstates it: two literal duplicate-position vertices Blender's own mesh never merged stay
+two separate cache entries here). A real glTF/FBX export does not use that same vertex buffer
+either way: it duplicates a vertex at every hard-edge/UV-seam discontinuity (split normals, a UV
+seam, a per-face-corner color), so the *actual* GPU-submitted index buffer for the exported file
+has more distinct vertex entries -- and therefore a real ACMR this report does not measure. Treat
+this metric as a relative signal for this tool's own triangle-order changes (did
+`--clean-mesh`/`--weld-doubles`/decimation improve or worsen cache locality on the mesh as
+authored), not a prediction of the exported file's real GPU cache behavior -- `--meshopt`
+(gltf-transform's own `reorder`, operating on the real exported index buffer) is the thing that
+actually optimizes for that.
+
+## ACMR's "0.5" is a common target for a large closed mesh, not a universal lower bound
+
+This report's own first version documented (and a test asserted) 0.5 as ACMR's theoretical best
+case. That's only the *asymptotic* value for a large closed/manifold mesh at the typical average
+vertex valence of 6 (Euler's formula: triangles = 2*vertices - 4 for a closed genus-0 mesh, so
+vertices/triangles -> 0.5 as vertex count grows) -- not a hard floor every mesh must sit at or
+above. Confirmed directly: a small, valid, deliberately non-manifold mesh (6 vertices, all 20
+possible triangular faces among them -- every triangle formed from that same small vertex pool)
+scores ACMR 0.3 on a real Blender 4.2.23, genuinely below 0.5. The one real, provable bound is the
+*worst* case, 3.0 -- a triangle only ever touches 3 vertices, so it can contribute at most 3
+misses, regardless of topology. Caught by review; don't assert or document 0.5 as a floor.

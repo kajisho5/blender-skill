@@ -130,7 +130,9 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   by definition; runs first so a decimate ratio/triangle budget is derived from a count that
   excludes dead geometry), report vertex-cache efficiency (`--vertex-cache-report`: each mesh
   object's Average Cache Miss Ratio -- a FIFO 32-entry vertex-cache simulation over the current
-  triangle order, 0.5 best/3.0 worst -- before and after this run's own topology changes; reports
+  triangle order, 3.0 the real worst case (no cache reuse at all), 0.5 a common target for a
+  large closed mesh but not a universal floor (an unusual small/non-manifold mesh can score
+  below it, confirmed directly) -- before and after this run's own topology changes; reports
   only, doesn't reorder itself, since `--meshopt` already delegates to gltf-transform's own
   cache-aware `reorder` command), fill boundary-edge holes (`--fill-holes`), bake unapplied scale
   into the mesh (`--fix-scale`),

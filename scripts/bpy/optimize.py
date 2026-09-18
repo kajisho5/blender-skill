@@ -1088,18 +1088,22 @@ def _vertex_cache_acmr(obj, cache_size=_VERTEX_CACHE_SIZE):
     vertex cache of `cache_size` entries, walking the mesh's triangles in their current
     submission order and counting a cache miss whenever a triangle references a vertex not
     already in the cache (a hit never reorders the cache -- real FIFO, not LRU). ACMR = total
-    misses / triangle count; ranges from the theoretical best 0.5 (a closed mesh with the typical
-    average vertex valence of 6, each vertex reused ~6 times before eviction) to the worst case
-    3.0 (every vertex of every triangle misses -- no cache reuse at all, e.g. triangles ordered
-    with no locality). None on a mesh with zero triangles (nothing to report). RM-042 -- this
-    tool only *reports* the metric; `--meshopt` (gltf-transform's own `reorder` command) does the
-    actual cache-aware reordering.
+    misses / triangle count; the real, provable worst case is 3.0 (every triangle only ever
+    touches 3 vertices, so it can contribute at most 3 misses -- true regardless of topology).
+    0.5 is a common *target*, not a universal floor: it's the asymptotic value for a large closed
+    manifold mesh at the typical average vertex valence of 6 (V/T -> 0.5 as V grows, per Euler's
+    formula), NOT a hard lower bound -- confirmed directly that a small, valid, non-manifold mesh
+    (6 vertices, all 20 possible triangular faces among them) scores 0.3, genuinely below 0.5, so
+    don't assert or document 0.5 as something every mesh must be at or above. None on a mesh with
+    zero triangles (nothing to report). RM-042 -- this tool only *reports* the metric; `--meshopt`
+    (gltf-transform's own `reorder` command) does the actual cache-aware reordering.
 
-    Computed on Blender's own internal per-position (welded) vertex topology via a temporary
-    bmesh -- not the fully split vertex buffer a real glTF/FBX export produces, which duplicates
-    a vertex at every hard-edge/UV-seam discontinuity (see references/pitfalls.md): a useful
-    relative signal for this tool's own triangle-order changes, not a bit-exact prediction of the
-    exported file's real GPU cache behavior.
+    Computed on Blender's own current mesh vertex topology exactly as `bm.from_mesh(obj.data)`
+    reflects it -- one BMVert per mesh vertex, with no deduplication/welding of its own -- not the
+    fully split vertex buffer a real glTF/FBX export produces, which duplicates a vertex at every
+    hard-edge/UV-seam discontinuity (see references/pitfalls.md): a useful relative signal for
+    this tool's own triangle-order changes, not a bit-exact prediction of the exported file's real
+    GPU cache behavior.
     """
     if obj.type != "MESH":
         return None

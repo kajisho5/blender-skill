@@ -48,7 +48,7 @@ def main() -> int:
     ap.add_argument("--origin", choices=["center", "bottom", "keep"], help="move each object's origin to its bounding-box center or bottom-center, without moving the geometry in world space; default keep")
     ap.add_argument("--weld-doubles", action="store_true", help="merge vertices at the same position (dist 1e-5)")
     ap.add_argument("--clean-mesh", action="store_true", help="remove orphan/loose vertices (touching no face at all) and degenerate faces (zero-area, e.g. three collinear points) from every mesh object. No-op on a point cloud (a vertices-only mesh has no faces, so every vertex would otherwise look 'orphan'). Runs first, ahead of every other topology change, so a --decimate-ratio/triangle budget is derived from a count that doesn't include dead geometry.")
-    ap.add_argument("--vertex-cache-report", action="store_true", help="report each mesh object's Average Cache Miss Ratio (ACMR) before and after this run's own topology changes -- a FIFO vertex-cache simulation (32-entry, a common GPU assumption) over the mesh's current triangle order. 0.5 is the theoretical best (a closed mesh, average vertex valence 6), 3.0 the worst (no cache reuse at all). This tool only reports the metric; it does not reorder triangles for cache locality itself -- use --meshopt (delegates to gltf-transform's own 'reorder' command) for the actual optimization.")
+    ap.add_argument("--vertex-cache-report", action="store_true", help="report each mesh object's Average Cache Miss Ratio (ACMR) before and after this run's own topology changes -- a FIFO vertex-cache simulation (32-entry, a common GPU assumption) over the mesh's current triangle order. 3.0 is the real worst case (no cache reuse at all); 0.5 is a common target for a large closed mesh (average vertex valence 6), not a universal floor -- an unusual small/non-manifold mesh can score below it. This tool only reports the metric; it does not reorder triangles for cache locality itself -- use --meshopt (delegates to gltf-transform's own 'reorder' command) for the actual optimization.")
     ap.add_argument("--recalc-normals", action="store_true", help="recalculate outside-facing normals")
     ap.add_argument("--triangulate", action="store_true")
     ap.add_argument("--texture-max", type=int, metavar="PX", help="downscale any texture wider/taller than this")
@@ -180,7 +180,7 @@ def main() -> int:
         for row in data["vertex_cache_report"]:
             before = f"{row['acmr_before']:.2f}" if row["acmr_before"] is not None else "n/a"
             after = f"{row['acmr_after']:.2f}" if row["acmr_after"] is not None else "n/a"
-            print(f"  {row['name']}: ACMR {before} -> {after} (0.5 best, 3.0 worst)")
+            print(f"  {row['name']}: ACMR {before} -> {after} (3.0 worst case; 0.5 is a common target, not a floor)")
         if data["holes_filled"]:
             print(f"  filled {data['holes_filled']} hole(s)")
         if data["scales_fixed"]:
