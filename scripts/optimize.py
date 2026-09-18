@@ -47,6 +47,7 @@ def main() -> int:
     ap.add_argument("--fix-scale", action="store_true", help="bake unapplied object scale into the mesh (a common cm/m unit-mismatch symptom -- see info.py's scale warning); world-space size is unchanged")
     ap.add_argument("--origin", choices=["center", "bottom", "keep"], help="move each object's origin to its bounding-box center or bottom-center, without moving the geometry in world space; default keep")
     ap.add_argument("--weld-doubles", action="store_true", help="merge vertices at the same position (dist 1e-5)")
+    ap.add_argument("--clean-mesh", action="store_true", help="remove orphan/loose vertices (touching no face at all) and degenerate faces (zero-area, e.g. three collinear points) from every mesh object. No-op on a point cloud (a vertices-only mesh has no faces, so every vertex would otherwise look 'orphan'). Runs first, ahead of every other topology change, so a --decimate-ratio/triangle budget is derived from a count that doesn't include dead geometry.")
     ap.add_argument("--recalc-normals", action="store_true", help="recalculate outside-facing normals")
     ap.add_argument("--triangulate", action="store_true")
     ap.add_argument("--texture-max", type=int, metavar="PX", help="downscale any texture wider/taller than this")
@@ -104,6 +105,7 @@ def main() -> int:
             "path": str(in_path.resolve()), "format": in_fmt,
             "output": str(Path(args.out).resolve()), "output_format": out_fmt,
             "decimate_ratio": args.decimate_ratio, "fill_holes": args.fill_holes, "weld_doubles": args.weld_doubles,
+            "clean_mesh": args.clean_mesh,
             "recalc_normals": args.recalc_normals, "triangulate": args.triangulate,
             "texture_max": args.texture_max, "purge_unused": args.purge_unused,
             "texture_auto_resolution": args.texture_auto_resolution, "viewport_width": args.viewport_width,
@@ -170,6 +172,10 @@ def main() -> int:
         print(f"  triangles: {data['triangles_before']} -> {data['triangles_after']} ({pct:.0f}% reduction)")
         if data["vertices_welded"]:
             print(f"  welded {data['vertices_welded']} duplicate vertices")
+        if data["loose_vertices_removed"]:
+            print(f"  removed {data['loose_vertices_removed']} orphan/loose vertice(s)")
+        if data["degenerate_faces_removed"]:
+            print(f"  removed {data['degenerate_faces_removed']} degenerate (zero-area) face(s)")
         if data["holes_filled"]:
             print(f"  filled {data['holes_filled']} hole(s)")
         if data["scales_fixed"]:

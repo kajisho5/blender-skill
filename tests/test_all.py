@@ -42,6 +42,9 @@ BROKEN_USDZ_FIXTURE = ROOT / "tests" / "fixtures" / "box_broken.usdz"
 PHONG_OBJ_FIXTURE = ROOT / "tests" / "fixtures" / "phong_materials.obj"
 THIN_WALL_STL_FIXTURE = ROOT / "tests" / "fixtures" / "thin_wall_box.stl"
 POINT_CLOUD_FIXTURE = ROOT / "tests" / "fixtures" / "points.ply"
+DIRTY_CUBE_FIXTURE = ROOT / "tests" / "fixtures" / "dirty_cube.blend"
+WIRE_MESH_FIXTURE = ROOT / "tests" / "fixtures" / "wire_mesh.blend"
+TINY_LEGIT_TRIANGLE_FIXTURE = ROOT / "tests" / "fixtures" / "tiny_legit_triangle.blend"
 
 
 def _blender_available() -> bool:
@@ -1234,6 +1237,98 @@ class TestToolchain(unittest.TestCase):
         proc2 = run("optimize.py", str(out1), "-o", str(out2), "--merge-materials", "--json")
         self.assertEqual(proc2.returncode, 0, proc2.stderr)
         self.assertEqual(json.loads(proc2.stdout)["materials_merged"], [])
+
+    def test_optimize_clean_mesh_removes_orphan_vertices_and_degenerate_faces(self):
+        # dirty_cube.blend: a normal 8-vertex/6-face cube plus one truly isolated point (no edges
+        # at all) and one zero-area degenerate face (three collinear, well-separated points --
+        # not near-duplicates, so this exercises Blender's own zero-area detection, not just a
+        # distance-based vertex merge). Hand-known exact expected output: back down to the plain
+        # cube's own 8 vertices / 12 triangles, 4 loose vertices removed (1 truly isolated + 3
+        # left behind once the degenerate face itself is dissolved -- confirmed directly that
+        # dissolve_degenerate leaves its face's own vertices as new orphans, not removed with it),
+        # 1 degenerate face removed.
+        out = self.out / "cube_cleaned.blend"
+        proc = run("optimize.py", str(DIRTY_CUBE_FIXTURE), "-o", str(out), "--clean-mesh", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["loose_vertices_removed"], 4)
+        self.assertEqual(data["degenerate_faces_removed"], 1)
+        self.assertEqual(data["triangles_before"], 13)
+        self.assertEqual(data["triangles_after"], 12)
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(info["meshes"]["vertices"], 8)
+        self.assertEqual(info["meshes"]["triangles"], 12)
+
+    def test_optimize_clean_mesh_is_a_noop_without_the_flag(self):
+        out = self.out / "cube_untouched.blend"
+        proc = run("optimize.py", str(DIRTY_CUBE_FIXTURE), "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["loose_vertices_removed"], 0)
+        self.assertEqual(data["degenerate_faces_removed"], 0)
+        self.assertEqual(data["triangles_before"], data["triangles_after"])
+
+    def test_optimize_clean_mesh_is_a_noop_on_a_point_cloud(self):
+        # points.ply: a 1000-point vertices-only mesh, no faces at all -- every one of its
+        # vertices touches zero faces by definition, so a naive "vertex touching no face is
+        # orphan" pass would delete the entire point cloud without this guard. Caught before
+        # shipping (not by review): confirmed the point count survives --clean-mesh exactly.
+        out = self.out / "points_cleaned.ply"
+        proc = run("optimize.py", str(POINT_CLOUD_FIXTURE), "-o", str(out), "--clean-mesh", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["loose_vertices_removed"], 0)
+        self.assertEqual(data["degenerate_faces_removed"], 0)
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(info["meshes"]["vertices"], 1000)
+
+    def test_optimize_clean_mesh_leaves_an_already_clean_mesh_untouched(self):
+        out = self.out / "box_cleaned.glb"
+        proc = run("optimize.py", str(FIXTURE), "-o", str(out), "--clean-mesh", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["loose_vertices_removed"], 0)
+        self.assertEqual(data["degenerate_faces_removed"], 0)
+        self.assertEqual(data["triangles_before"], data["triangles_after"])
+
+    def test_optimize_clean_mesh_does_not_destroy_a_wire_mesh(self):
+        # wire_mesh.blend: a real 4-vertex/3-edge open chain with zero faces (the kind a glTF
+        # LINES-primitive import or a skeleton/cage visualization produces) -- every one of its
+        # vertices touches zero faces by definition, the same criterion _clean_mesh uses for
+        # "orphan". Confirmed directly that narrowing the point-cloud guard to "no faces AND no
+        # edges" (as suggested in review) reintroduces exactly this failure: applying that
+        # narrower guard here deletes all 4 vertices outright, not just point clouds. The guard
+        # here stays "no faces at all", covering a wire mesh the same as a point cloud.
+        out = self.out / "wire_cleaned.blend"
+        proc = run("optimize.py", str(WIRE_MESH_FIXTURE), "-o", str(out), "--clean-mesh", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["loose_vertices_removed"], 0)
+        self.assertEqual(data["degenerate_faces_removed"], 0)
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(info["meshes"]["vertices"], 4)
+
+    def test_optimize_clean_mesh_preserves_a_real_tiny_nondegenerate_face(self):
+        # tiny_legit_triangle.blend: a real, non-degenerate micro-scale triangle (edges of 5e-5
+        # units, a real ~1.25e-9 area -- the kind of fine detail a jewelry/PCB/scientific-scale
+        # asset can legitimately have). Confirmed directly that _DEGENERATE_DIST=1e-4 (matching
+        # bpy.ops.mesh.dissolve_degenerate's own edit-mode default) collapses this real face away
+        # entirely (3 verts/1 poly -> 1 vert/0 polys); at dist=0.0, dissolve_degenerate's separate
+        # exact-area "degenerate ear" mechanism (not gated by dist at all) still correctly removes
+        # a genuinely zero-area face (see the dirty-cube test above) while this real one survives.
+        out = self.out / "tiny_cleaned.blend"
+        proc = run("optimize.py", str(TINY_LEGIT_TRIANGLE_FIXTURE), "-o", str(out), "--clean-mesh", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["loose_vertices_removed"], 0)
+        self.assertEqual(data["degenerate_faces_removed"], 0)
+
+        info = json.loads(run("info.py", str(out), "--json").stdout)
+        self.assertEqual(info["meshes"]["vertices"], 3)
+        self.assertEqual(info["meshes"]["triangles"], 1)
 
     def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
         # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published

@@ -99,6 +99,69 @@ def _weld_and_triangulate(obj, weld: bool, triangulate: bool, recalc_normals: bo
     return removed
 
 
+_DEGENERATE_DIST = 0.0  # see _clean_mesh's docstring -- NOT bpy.ops.mesh.dissolve_degenerate's own
+# 1e-4 default: that default is a short-*edge*-collapse tolerance, which also collapses a real,
+# legitimately tiny (but positive-area) triangle -- confirmed directly (edges of 5e-5 units each,
+# a real ~1.25e-9 area face) collapses away entirely at dist=1e-4. 0.0 disables that edge-collapse
+# mechanism outright while leaving bmesh.ops.dissolve_degenerate's *other*, separate mechanism (an
+# exact-area "degenerate ear" check, not gated by dist at all) doing the actual work this feature
+# needs -- confirmed it still correctly removes a real zero-area face (three well-separated,
+# merely collinear points, no edge anywhere near degenerate-short) at dist=0.0, identically to
+# 1e-4. Caught by review.
+
+
+def _clean_mesh(obj) -> tuple[int, int]:
+    """Removes orphan/loose vertices (touching no face at all -- a true isolated point, or a
+    vertex only ever used by a loose edge) and degenerate faces (zero-area, e.g. three collinear
+    points, or duplicate-position points folded into a sliver) via bmesh.ops directly -- no mode
+    switch, matching this file's other bmesh-only cleanup functions. Returns
+    (loose_vertices_removed, degenerate_faces_removed).
+
+    Two orphan-vertex passes bracket the one dissolve_degenerate call, not one: confirmed directly
+    that dissolve_degenerate removes the degenerate *face* itself but leaves its vertices behind as
+    now-orphaned loose geometry (a face-less point, or a loose edge between two now-face-less
+    points) -- a single before/after pass would report the face gone but leave its dead vertices
+    sitting in the output mesh. A run on an already-clean mesh (a real sphere, no defects) is
+    confirmed to touch nothing: same vertex/edge/face counts before and after.
+
+    A no-op (returns (0, 0)) on ANY mesh with zero faces -- a point cloud (a PLY vertices-only
+    mesh, no faces at all -- see _thin_point_cloud's own len(obj.data.polygons) == 0 check), but
+    also a genuine wire mesh (edges but still no faces, e.g. a glTF LINES-primitive import, a
+    skeleton/cage visualization): every one of its vertices touches zero faces by definition
+    (the same "orphan vertex" criterion above), so without this guard on ANY zero-face mesh, not
+    just a point cloud specifically, the orphan-vertex pass would delete the whole thing outright
+    -- confirmed directly with a hand-built 4-vertex/3-edge open wire chain: 0 vertices survived.
+    Deliberately not narrowed to "no faces AND no edges" (i.e. still skipping a wire mesh) -- that
+    narrower guard was suggested in review, but confirmed it reintroduces exactly this same
+    whole-object deletion for any wire mesh, since the "orphan vertex" criterion here is
+    necessarily face-based (see the note above on why edge-based alone would miss real leftover
+    geometry after dissolve_degenerate), not edge-based. Caught before shipping and re-verified
+    against review's own suggestion, not just dismissed.
+    """
+    if len(obj.data.polygons) == 0:
+        return 0, 0
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+
+    orphan_verts = [v for v in bm.verts if not v.link_faces]
+    loose_removed = len(orphan_verts)
+    bmesh.ops.delete(bm, geom=orphan_verts, context="VERTS")
+
+    faces_before = len(bm.faces)
+    bmesh.ops.dissolve_degenerate(bm, dist=_DEGENERATE_DIST, edges=bm.edges[:])
+    degenerate_removed = faces_before - len(bm.faces)
+
+    leftover_verts = [v for v in bm.verts if not v.link_faces]
+    loose_removed += len(leftover_verts)
+    bmesh.ops.delete(bm, geom=leftover_verts, context="VERTS")
+
+    bm.normal_update()
+    bm.to_mesh(obj.data)
+    obj.data.update()
+    bm.free()
+    return loose_removed, degenerate_removed
+
+
 def _fill_holes(obj) -> int:
     """Fills boundary loops (edges used by exactly 1 face -- an actual hole/gap, see
     info.py's non_manifold_edges/boundary_edges note) with an n-gon each. Does not touch
@@ -1103,6 +1166,8 @@ def run(args):
     holes_filled_total = 0
     scales_fixed_total = 0
     points_thinned_total = 0
+    loose_vertices_removed_total = 0
+    degenerate_faces_removed_total = 0
     warnings = []
     # Topology-changing operations (--fill-holes adds real geometry; weld/triangulate can also
     # change the real triangle count) run for every mesh object *before* any triangle_budget ratio
@@ -1111,7 +1176,14 @@ def run(args):
     # budget despite this feature's own guarantee. Reproduced directly: a triangle_budget exactly
     # equal to a hole-containing mesh's pre-fill-holes count (so no decimation looked necessary)
     # still exported over budget once --fill-holes added its new face. Caught by review.
+    # --clean-mesh runs first, ahead of every other topology change: a decimate ratio or triangle
+    # budget derived from a count that still includes dead/orphan geometry would be computed from
+    # a number the real export never actually needed to hit.
     for o in mesh_objs:
+        if args.get("clean_mesh"):
+            loose, degenerate = _clean_mesh(o)
+            loose_vertices_removed_total += loose
+            degenerate_faces_removed_total += degenerate
         point_thin_voxel = args.get("point_thin_voxel")
         if point_thin_voxel and point_thin_voxel > 0:
             points_thinned_total += _thin_point_cloud(o, point_thin_voxel)
@@ -1216,6 +1288,8 @@ def run(args):
         "triangles_before": before_tris,
         "triangles_after": after_tris,
         "vertices_welded": welded_total,
+        "loose_vertices_removed": loose_vertices_removed_total,
+        "degenerate_faces_removed": degenerate_faces_removed_total,
         "holes_filled": holes_filled_total,
         "scales_fixed": scales_fixed_total,
         "points_thinned": points_thinned_total,

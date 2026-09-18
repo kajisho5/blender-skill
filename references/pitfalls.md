@@ -890,3 +890,49 @@ fixed by short-circuiting `_psnr` on a non-finite MSE (returns NaN instead of ca
 and by having `_mode_compare` check `math.isfinite()` on both scores before including them,
 falling back to `score_skipped` otherwise -- never assume image pixel data is well-behaved just
 because it loaded without an error.
+
+## `bmesh.ops.dissolve_degenerate` removes the degenerate face, not its vertices -- sweep loose geometry again afterward
+
+`optimize.py --clean-mesh`'s first version ran one orphan-vertex pass, then one
+`dissolve_degenerate` call, and reported done. Confirmed directly (a cube plus one zero-area
+triangle made of three well-separated collinear points, not near-duplicates): `dissolve_degenerate`
+correctly removes the degenerate *face* itself (polygon count drops), but its three vertices
+survive in the output mesh as newly-orphaned loose geometry (touching no face, some still joined
+by a loose edge) -- a single before/after pass reports the defect fixed while the dead vertices
+stay in the exported file. Fixed by running the same "vertex touching no face" removal pass a
+second time, after `dissolve_degenerate`, not just before it.
+
+## A point cloud's every vertex "touches no face" -- guard a face-based cleanup against it
+
+`_clean_mesh`'s "remove any vertex touching zero faces" logic is correct for a normal mesh's
+orphan/loose vertices, but a point cloud (a vertices-only mesh, e.g. from PLY scan data -- see
+`_thin_point_cloud`) has *no faces at all*, so every single one of its vertices matches that same
+condition. Caught before shipping, not by review: without an explicit
+`len(obj.data.polygons) == 0` guard (the same check `_thin_point_cloud` already uses for the
+inverse case), `--clean-mesh` on a real 1000-point `.ply` file would have deleted the entire point
+cloud instead of leaving it alone -- confirmed the guard preserves the exact point count.
+
+The same failure mode applies to a genuine wire mesh (edges but still zero faces, e.g. a glTF
+LINES-primitive import or a skeleton/cage visualization), not just a point cloud specifically --
+review suggested narrowing the guard to "no faces AND no edges" so a wire mesh's own loose
+vertices would still get cleaned, but confirmed directly that this reintroduces the exact same
+whole-object deletion: a hand-built 4-vertex/3-edge open wire chain went from 4 vertices to 0
+under that narrower guard, since `_clean_mesh`'s "orphan vertex" check is necessarily face-based
+(needed to sweep up `dissolve_degenerate`'s own leftover loose edges -- see the entry above), not
+edge-based. Kept the guard as "no faces at all", covering both cases the same way, rather than
+applying a suggested fix that was verified to make things worse.
+
+## `dissolve_degenerate`'s `dist` is an edge-collapse tolerance, not an area threshold -- 1e-4 destroys real tiny geometry
+
+`_clean_mesh`'s first version passed `dist=1e-4` to `bmesh.ops.dissolve_degenerate`, reasoning
+(wrongly) that this matched `bpy.ops.mesh.dissolve_degenerate`'s own edit-mode-operator default.
+Blender's own C implementation (`bmo_dissolve_degenerate_exec`) actually runs two independent
+mechanisms: (1) collapse any edge whose length is under `dist` (this is what `dist` actually
+controls), and (2) a separate, dist-independent "degenerate ear" check that clips a genuinely
+zero-area triangular face regardless of its edges' length. Confirmed directly: `dist=1e-4`
+collapses away a real, non-degenerate micro-scale triangle (edges of 5e-5 units, a real positive
+~1.25e-9 area -- plausible fine detail on a jewelry/PCB/scientific-scale asset) down to a single
+point, while `dist=0.0` leaves that same real triangle untouched *and* still correctly removes a
+genuinely zero-area face (three well-separated, merely collinear points -- mechanism (2), never
+gated by `dist` at all) exactly as before. Fixed by using `dist=0.0`, disabling only the
+short-edge-collapse mechanism this feature never needed. Caught by review.
