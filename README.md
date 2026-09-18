@@ -219,8 +219,9 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
   a 4-view sheet. Eevee by default, `--cycles` to switch.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a
-  before/after comparison, or the UV layout (as SVG -- headless Blender's PNG UV export needs a
-  GPU offscreen context `-b` mode doesn't have).
+  before/after comparison (with a pure-numpy PSNR/SSIM similarity score when the two images share
+  pixel dimensions), or the UV layout (as SVG -- headless Blender's PNG UV export needs a GPU
+  offscreen context `-b` mode doesn't have).
 - **`check.py`** -- PASS/WARN/FAIL against a delivery target's budget (three.js, Unity, Unreal,
   Godot, iOS/Android AR, WebXR, 3D printing, Sketchfab), every row naming its fix command; for
   `.usdz` inputs, also validates the package itself against Apple's real USDZ requirements (every

@@ -845,3 +845,28 @@ restricts. Caught by review. Fixed by giving each `triangle_budget` preset an ex
 independently against the same absolute number when it's "per_mesh" -- never assume every
 per-object platform budget generalizes to "sum the whole file and derive one ratio" just because
 that's what two out of three real examples happened to want.
+
+## A PSNR score of +inf is textbook-correct but not valid JSON -- cap it at a finite sentinel
+
+`_psnr`'s textbook definition sends identical images (MSE=0) to `+inf`. Python's own `json.dump`
+happily serializes `float('inf')` by default (`allow_nan=True`) as the bare token `Infinity`,
+which `json.load` round-trips fine within this project's own Python-to-Python bpy<->host pipe --
+but `Infinity` is not valid JSON per RFC 8259, so a coding agent parsing `look.py --compare`'s
+`--json` output with a strict parser (e.g. `JSON.parse` in Node, or most non-Python JSON
+libraries) would throw on exactly the "the two images are identical" case, the most common one in
+practice (comparing a render against itself, or verifying a lossless conversion changed nothing).
+Fixed by reporting the finite sentinel `_PSNR_IDENTICAL_DB = 100.0` instead of `float('inf')` --
+well above any PSNR a real lossy difference would produce, so it stays distinguishable in
+practice, while keeping the field a normal JSON number every consumer can parse.
+
+## SSIM's box-window simplification is a real, deliberate deviation from the reference formula
+
+`_ssim`'s local mean/variance/covariance statistics use a uniform box window (`_box_local_mean`,
+via `numpy.pad` + `numpy.lib.stride_tricks.sliding_window_view`) rather than the SSIM literature's
+standard Gaussian-weighted window, to avoid adding a scipy dependency to a script that otherwise
+only needs numpy (already bundled with Blender's own Python, unlike scipy which is not). Scores
+still trend the same direction (near 1.0 for near-identical images, near 0 for very different
+ones, confirmed against solid-color images' closed-form values and a real before/after decimation
+render pair), but do not expect them to match `skimage.metrics.structural_similarity`'s output
+bit-for-bit on the same two images -- treat this tool's SSIM as a self-consistent relative
+similarity signal, not an interoperable implementation of the reference algorithm.
