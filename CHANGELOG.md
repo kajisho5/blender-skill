@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.26.0...blender-skill-v0.27.0) (2026-09-18)
+
+
+### Features
+
+* **optimize:** RM-040 visual diff score for look.py --compare (PSNR/SSIM) ([#153](https://github.com/kajisho5/blender-skill/issues/153)) ([8b3b246](https://github.com/kajisho5/blender-skill/commit/8b3b24663ede1cefd83a20b1b8467f0c6deece9c))
+
 ## [0.26.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.25.0...blender-skill-v0.26.0) (2026-09-17)
 
 
