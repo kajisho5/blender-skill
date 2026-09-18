@@ -1499,6 +1499,25 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("mipmaps for Image_0: 11 level(s) (1024x1024 down to 1x1)", proc.stdout)
 
+    def test_optimize_generate_mipmaps_avoids_case_insensitive_filename_collisions(self):
+        # case_collision_textures.blend: two cubes, each with its own real, distinctly-named
+        # texture ("Albedo" and "albedo") -- Blender itself guarantees Image.name is unique, but
+        # a naive case-sensitive collision check would still let both sanitize to filenames that
+        # are the *same real file* on a case-insensitive filesystem (macOS/Windows, both in this
+        # project's own CI matrix), silently letting the second mip chain overwrite the first.
+        out = self.out / "case_collision.blend"
+        mip_dir = self.out / "mips_case"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "case_collision_textures.blend"),
+                   "-o", str(out), "--generate-mipmaps", str(mip_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual({m["name"] for m in data["mipmaps_generated"]}, {"Albedo", "albedo"})
+        paths = [m["levels"][0]["path"] for m in data["mipmaps_generated"]]
+        # The real regression: even case-*folded*, the two level-0 paths must differ.
+        self.assertNotEqual(paths[0].casefold(), paths[1].casefold())
+        for p in paths:
+            self.assertTrue(Path(p).exists())
+
     def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
         # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published
         # "individual meshes cannot exceed 20,000 triangles" (create.roblox.com/docs/art/

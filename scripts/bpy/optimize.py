@@ -331,6 +331,13 @@ def _generate_mipmaps(mesh_objs, out_dir: str) -> list:
     run(), skipping the level-0 scale on the copy would silently generate a mip chain from the
     texture's *original* pre-resize resolution instead of the one actually being exported. See
     references/pitfalls.md.
+
+    Collision avoidance compares sanitized names case-*insensitively* (`str.casefold()`), even
+    though `image_name` itself (Blender's own `bpy.types.Image.name`) is already guaranteed
+    unique: on a case-insensitive filesystem (macOS/Windows, both in this project's own CI
+    matrix -- not a hypothetical), two distinctly-named images differing only by case (e.g.
+    "Albedo" and "albedo") would sanitize to filenames that are the same real file on disk,
+    silently letting the second chain overwrite the first. Caught by review.
     """
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     used_names = set()
@@ -345,10 +352,10 @@ def _generate_mipmaps(mesh_objs, out_dir: str) -> list:
             continue
         base = _safe_filename(image_name)
         name, n = base, 1
-        while name in used_names:
+        while name.casefold() in used_names:
             n += 1
             name = f"{base}_{n}"
-        used_names.add(name)
+        used_names.add(name.casefold())
 
         copy = img.copy()
         levels = []
