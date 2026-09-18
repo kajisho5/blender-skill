@@ -947,8 +947,9 @@ two separate cache entries here). A real glTF/FBX export does not use that same 
 either way: it duplicates a vertex at every hard-edge/UV-seam discontinuity (split normals, a UV
 seam, a per-face-corner color), so the *actual* GPU-submitted index buffer for the exported file
 has more distinct vertex entries -- and therefore a real ACMR this report does not measure. Treat
-this metric as a relative signal for this tool's own triangle-order changes (did
-`--clean-mesh`/`--weld-doubles`/decimation improve or worsen cache locality on the mesh as
+this metric as a relative signal for the topology changes this tool itself performed (did
+`--clean-mesh`/`--weld-doubles`/decimation -- which can change vertex sharing, vertex count, and
+triangle connectivity, not just triangle order -- improve or worsen cache locality on the mesh as
 authored), not a prediction of the exported file's real GPU cache behavior -- `--meshopt`
 (gltf-transform's own `reorder`, operating on the real exported index buffer) is the thing that
 actually optimizes for that.
