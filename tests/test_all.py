@@ -79,6 +79,33 @@ def _write_solid_png(path, w, h, rgb) -> None:
     Path(path).write_bytes(png)
 
 
+def _png_dims(path) -> tuple:
+    """(width, height) read directly from a PNG file's own IHDR chunk (signature(8) + length(4)
+    + "IHDR"(4) = byte 16, then two big-endian uint32s) -- verifies the actual bytes on disk,
+    not just whatever a tool's own JSON claimed it wrote."""
+    with open(path, "rb") as f:
+        header = f.read(24)
+    return struct.unpack(">II", header[16:24])
+
+
+def _glb_image_dims(path, image_index=0) -> tuple:
+    """(width, height) of the Nth embedded image in a .glb, read directly from the file's own
+    JSON+BIN chunks and that image's real PNG bytes -- confirms what the exporter actually wrote
+    to the container, not what Blender's own in-memory Image datablock reports (which needs its
+    lazy pixel data force-loaded first to even have a non-zero .size -- see look.py)."""
+    with open(path, "rb") as f:
+        f.read(12)
+        json_len, _json_type = struct.unpack("<II", f.read(8))
+        gltf = json.loads(f.read(json_len))
+        bin_len, _bin_type = struct.unpack("<II", f.read(8))
+        bin_chunk = f.read(bin_len)
+    image = gltf["images"][image_index]
+    view = gltf["bufferViews"][image["bufferView"]]
+    offset = view.get("byteOffset", 0)
+    png_bytes = bin_chunk[offset:offset + view["byteLength"]]
+    return struct.unpack(">II", png_bytes[16:24])
+
+
 class TestUsdzValidate(unittest.TestCase):
     """No Blender needed -- _usdz_validate reads a .usdz's own zip structure directly. The
     negative case can't be driven through check.py's CLI end-to-end: Blender's own USD importer
@@ -1409,6 +1436,68 @@ class TestToolchain(unittest.TestCase):
         row = data["vertex_cache_report"][0]
         self.assertAlmostEqual(row["acmr_before"], 0.3, places=9)
         self.assertLess(row["acmr_before"], 0.5)
+
+    def test_optimize_generate_mipmaps_matches_a_hand_computed_chain_on_a_real_texture(self):
+        # fox.glb's own single texture ("Image_0") is 1024x1024 -- the real, hand-derivable full
+        # mip chain is 1024,512,256,128,64,32,16,8,4,2,1 (11 levels: floor(log2(1024))+1), down
+        # to the standard GPU mip-chain floor of 1x1, not an arbitrary cutoff. Verified against
+        # the actual PNG bytes on disk (not just the tool's own reported JSON) for level 0 and
+        # the last two levels, where an off-by-one in the halve-until-1x1 loop would most likely
+        # show up.
+        out = self.out / "fox_mipmaps.glb"
+        mip_dir = self.out / "mips"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out),
+                   "--generate-mipmaps", str(mip_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["mipmaps_generated"]), 1)
+        entry = data["mipmaps_generated"][0]
+        self.assertEqual(entry["name"], "Image_0")
+        self.assertEqual(entry["width"], 1024)
+        self.assertEqual(entry["height"], 1024)
+        levels = entry["levels"]
+        expected_sizes = [1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1]
+        self.assertEqual([lvl["width"] for lvl in levels], expected_sizes)
+        self.assertEqual([lvl["height"] for lvl in levels], expected_sizes)
+        self.assertEqual(_png_dims(levels[0]["path"]), (1024, 1024))
+        self.assertEqual(_png_dims(levels[-2]["path"]), (2, 2))
+        self.assertEqual(_png_dims(levels[-1]["path"]), (1, 1))
+
+        # The throwaway copy this feature scales must never touch the real texture still
+        # referenced by this run's own export -- confirmed against the exported glb's own real
+        # embedded PNG bytes, not Blender's in-memory report.
+        self.assertEqual(_glb_image_dims(out), (1024, 1024))
+
+    def test_optimize_generate_mipmaps_is_empty_without_the_flag(self):
+        out = self.out / "fox_no_mipmaps.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["mipmaps_generated"], [])
+
+    def test_optimize_generate_mipmaps_level_zero_reflects_this_runs_own_texture_max_resize(self):
+        # Combined with --texture-max 256: mip level 0 must be the *resized* 256x256 texture this
+        # run is actually exporting, not the original 1024x1024 -- otherwise a downstream
+        # pipeline's mip chain wouldn't match its own base texture.
+        out = self.out / "fox_mipmaps_resized.glb"
+        mip_dir = self.out / "mips_resized"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out),
+                   "--texture-max", "256", "--generate-mipmaps", str(mip_dir), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        entry = data["mipmaps_generated"][0]
+        self.assertEqual(entry["width"], 256)
+        self.assertEqual(entry["height"], 256)
+        self.assertEqual(len(entry["levels"]), 9)  # floor(log2(256))+1
+        self.assertEqual(_png_dims(entry["levels"][0]["path"]), (256, 256))
+
+    def test_optimize_generate_mipmaps_prints_the_level_count_in_text_mode(self):
+        out = self.out / "fox_mipmaps_text.glb"
+        mip_dir = self.out / "mips_text"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "fox.glb"), "-o", str(out),
+                   "--generate-mipmaps", str(mip_dir))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("mipmaps for Image_0: 11 level(s) (1024x1024 down to 1x1)", proc.stdout)
 
     def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
         # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published

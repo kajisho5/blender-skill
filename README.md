@@ -167,7 +167,17 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   `references/pitfalls.md`); `--draco`/`--meshopt`/`--ktx2` delegate
   to [gltf-transform](https://github.com/donmccurdy/glTF-Transform) (and, for `--ktx2`, the
   [KTX-Software](https://github.com/KhronosGroup/KTX-Software) `ktx` CLI) when installed, and say
-  so and skip just that step when they aren't. `--recalc-normals` warns instead of silently
+  so and skip just that step when they aren't. `--generate-mipmaps DIR` pre-generates the full
+  mip chain (level 0 = this run's own final texture size -- after any `--texture-max`/
+  `--texture-auto-resolution` resize -- each level independently halved per dimension down to
+  1x1, the standard GPU mip-chain definition) as separate PNG files under `DIR`, for every
+  texture a mesh object's material actually references, using Blender's own `Image.scale()` (a
+  real box/bilinear filter, confirmed directly against a checkerboard pattern -- not a naive
+  nearest-neighbor resize); runs on a throwaway copy, never touching the texture still referenced
+  by this run's own export. For a pipeline/engine that needs mips pre-baked as loose files rather
+  than generated at runtime or embedded in a container format -- `--ktx2` already embeds its own
+  generated mip chain in the compressed KTX2 texture, so use `--generate-mipmaps` instead only
+  when you need the mips as standalone files. `--recalc-normals` warns instead of silently
   trusting its own output on a still-non-manifold mesh -- see `references/pitfalls.md`, this is a
   real failure mode, not a hypothetical one. `--fix-colorspace` corrects a texture's colorspace
   tag based on which material socket it feeds (Base Color/Emission need `sRGB`; Metallic/

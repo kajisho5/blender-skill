@@ -298,6 +298,78 @@ def _auto_texture_max(mesh_objs, viewport_width: int) -> dict:
     return caps
 
 
+def _safe_filename(name: str) -> str:
+    keep = "-_. ()"
+    return "".join(c if c.isalnum() or c in keep else "_" for c in name).strip() or "texture"
+
+
+def _generate_mipmaps(mesh_objs, out_dir: str) -> list:
+    """For every texture referenced by mesh_objs' own material graphs (via _image_users --
+    same "only touch what a real usage signal points at" scoping as _auto_texture_max), writes
+    the full mip chain as separate PNG files under out_dir: level 0 is this run's own final
+    texture size (after any --texture-max/--texture-auto-resolution resize already applied
+    earlier in run()), each subsequent level independently halves each dimension (floor-rounded,
+    clamped to a minimum of 1), down to 1x1 -- the standard GPU mip-chain definition, not an
+    arbitrary cutoff.
+
+    Runs Image.scale() on a throwaway bpy.types.Image.copy() of each source, chained level to
+    level (each level scaled from the previous one, not re-derived from the original every time
+    -- cheaper, and the conventional GPU approach); the original `img` still referenced by this
+    run's own export is never touched. Confirmed directly on a real Blender 4.2.23: an 8x8
+    checkerboard (alternating pure black/white pixels) scaled to 4x4 came out flat ~0.502 gray
+    across all 16 pixels -- real box/bilinear blending of each 2x2 block, not a naive nearest-
+    neighbor pick (which would have stayed pure black/white) -- so the chain is genuinely
+    alias-reduced, unlike look.py's own `_resize` (nearest-neighbor, explicitly documented there
+    as not quality-critical -- fine for a thumbnail contact sheet, wrong for this).
+
+    Level 0 is always explicitly scaled too (never just `img.copy()` left as-is), even though
+    that looks like a same-size no-op when `img` was never resized upstream: confirmed directly
+    that `Image.copy()` does NOT inherit a prior in-place `.scale()` call's effect -- a 64x64
+    image scaled in place to 16x16, then copied, came back out as a 64x64 copy again (its own
+    pixel data re-derived from the image's original backing buffer, not the mutated runtime
+    one) -- so when --texture-max/--texture-auto-resolution already shrank `img` earlier in
+    run(), skipping the level-0 scale on the copy would silently generate a mip chain from the
+    texture's *original* pre-resize resolution instead of the one actually being exported. See
+    references/pitfalls.md.
+    """
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    used_names = set()
+    manifest = []
+    for image_name in _image_users(mesh_objs):
+        img = bpy.data.images.get(image_name)
+        if img is None:
+            continue
+        len(img.pixels)  # force the lazy load (see look.py) before reading size/copying
+        w, h = img.size
+        if w < 1 or h < 1:
+            continue
+        base = _safe_filename(image_name)
+        name, n = base, 1
+        while name in used_names:
+            n += 1
+            name = f"{base}_{n}"
+        used_names.add(name)
+
+        copy = img.copy()
+        levels = []
+        cw, ch = w, h
+        level = 0
+        while True:
+            copy.scale(cw, ch)
+            path = str(Path(out_dir) / f"{name}_mip{level}.png")
+            copy.filepath_raw = path
+            copy.file_format = "PNG"
+            copy.save()
+            levels.append({"level": level, "width": cw, "height": ch, "path": path})
+            if cw == 1 and ch == 1:
+                break
+            cw, ch = max(1, cw // 2), max(1, ch // 2)
+            level += 1
+        bpy.data.images.remove(copy)
+        manifest.append({"name": image_name, "width": w, "height": h, "levels": levels})
+    return manifest
+
+
 def _fix_scale(obj) -> bool:
     """Bakes obj.scale into the mesh data (bpy.ops.object.transform_apply(scale=True)), leaving
     world-space size/position unchanged -- confirmed: an object with scale (0.01, 0.01, 0.01)
@@ -1290,6 +1362,10 @@ def run(args):
         resized = []
     purged = _purge_unused() if args.get("purge_unused") else 0
 
+    mipmaps_generated = []
+    if args.get("mipmap_dir"):
+        mipmaps_generated = _generate_mipmaps(mesh_objs, args["mipmap_dir"])
+
     colorspace_fixed = 0
     if args.get("fix_colorspace"):
         colorspace_fixed = _fix_colorspace(list(bpy.data.materials))
@@ -1362,6 +1438,7 @@ def run(args):
         "points_thinned": points_thinned_total,
         "textures_resized": resized,
         "texture_auto_caps": auto_caps,
+        "mipmaps_generated": mipmaps_generated,
         "orphan_data_purged": purged,
         "colorspace_fixed": colorspace_fixed,
         "texture_colorspace_changed": texture_colorspace_changed,
