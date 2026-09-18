@@ -132,7 +132,8 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   object's Average Cache Miss Ratio -- a FIFO 32-entry vertex-cache simulation over the current
   triangle order, 3.0 the real worst case (no cache reuse at all), 0.5 a common target for a
   large closed mesh but not a universal floor (an unusual small/non-manifold mesh can score
-  below it, confirmed directly) -- before and after this run's own topology changes; reports
+  below it, confirmed directly) -- before and after this run's own topology changes, a
+  zero-triangle mesh reporting `null` in `--json` output and `n/a` in text output; reports
   only, doesn't reorder itself, since `--meshopt` already delegates to gltf-transform's own
   cache-aware `reorder` command), fill boundary-edge holes (`--fill-holes`), bake unapplied scale
   into the mesh (`--fix-scale`),
