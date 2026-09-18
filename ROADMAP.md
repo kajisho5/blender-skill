@@ -51,7 +51,7 @@ what v0.1.0 actually does.
 | RM-038 | optimize | マテリアル統合（同一パラメータをマージ） | done | #31 |
 | RM-039 | optimize | `--target-*` プリセット拡充：sketchfab, vrchat, roblox, gltf-viewer, quicklook | done | #32 |
 | RM-040 | optimize | 最適化前後の視覚差分スコア（レンダ画像のPSNR/SSIMをNumPyベースで） | done | #33 |
-| RM-041 | optimize | メッシュのクリーンアップ（孤立頂点・退化面・ゼロ面積） | planned | #34 |
+| RM-041 | optimize | メッシュのクリーンアップ（孤立頂点・退化面・ゼロ面積） | done | #34 |
 | RM-042 | optimize | 頂点順序/キャッシュ最適化のレポート | planned | #35 |
 | RM-043 | optimize | ミップマップ用テクスチャ事前生成 | planned | #36 |
 | RM-044 | optimize | 法線マップの形式検出と変換（OpenGL/DirectX） | planned | #37 |

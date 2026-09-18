@@ -890,3 +890,24 @@ fixed by short-circuiting `_psnr` on a non-finite MSE (returns NaN instead of ca
 and by having `_mode_compare` check `math.isfinite()` on both scores before including them,
 falling back to `score_skipped` otherwise -- never assume image pixel data is well-behaved just
 because it loaded without an error.
+
+## `bmesh.ops.dissolve_degenerate` removes the degenerate face, not its vertices -- sweep loose geometry again afterward
+
+`optimize.py --clean-mesh`'s first version ran one orphan-vertex pass, then one
+`dissolve_degenerate` call, and reported done. Confirmed directly (a cube plus one zero-area
+triangle made of three well-separated collinear points, not near-duplicates): `dissolve_degenerate`
+correctly removes the degenerate *face* itself (polygon count drops), but its three vertices
+survive in the output mesh as newly-orphaned loose geometry (touching no face, some still joined
+by a loose edge) -- a single before/after pass reports the defect fixed while the dead vertices
+stay in the exported file. Fixed by running the same "vertex touching no face" removal pass a
+second time, after `dissolve_degenerate`, not just before it.
+
+## A point cloud's every vertex "touches no face" -- guard a face-based cleanup against it
+
+`_clean_mesh`'s "remove any vertex touching zero faces" logic is correct for a normal mesh's
+orphan/loose vertices, but a point cloud (a vertices-only mesh, e.g. from PLY scan data -- see
+`_thin_point_cloud`) has *no faces at all*, so every single one of its vertices matches that same
+condition. Caught before shipping, not by review: without an explicit
+`len(obj.data.polygons) == 0` guard (the same check `_thin_point_cloud` already uses for the
+inverse case), `--clean-mesh` on a real 1000-point `.ply` file would have deleted the entire point
+cloud instead of leaving it alone -- confirmed the guard preserves the exact point count.

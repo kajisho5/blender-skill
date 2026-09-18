@@ -124,8 +124,12 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   separate animation clips for it. Both discard Blender's own synthesized bone-shape display
   widget rather than treating it as real content to preserve (confirmed not to exist in the
   source file's own data -- see `references/pitfalls.md`).
-- **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, fill
-  boundary-edge holes (`--fill-holes`), bake unapplied scale into the mesh (`--fix-scale`),
+- **`optimize.py`** -- decimate, weld duplicate vertices, recalculate normals, triangulate, clean
+  up a mesh (`--clean-mesh`: orphan/loose vertices touching no face at all, plus degenerate
+  zero-area faces -- a no-op on a point cloud, since every one of its vertices touches zero faces
+  by definition; runs first so a decimate ratio/triangle budget is derived from a count that
+  excludes dead geometry), fill boundary-edge holes (`--fill-holes`), bake unapplied scale into
+  the mesh (`--fix-scale`),
   recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
   resolution, purge orphan data, thin a point cloud by voxel-grid downsampling
   (`--point-thin-voxel SIZE` -- a no-op on any mesh that has faces, since that's what
