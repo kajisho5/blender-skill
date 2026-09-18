@@ -1113,6 +1113,13 @@ def _vertex_cache_acmr(obj, cache_size=_VERTEX_CACHE_SIZE):
     if not bm.faces:
         bm.free()
         return None
+    # Defensive, not a fix for an observed bug here: confirmed directly on a real Blender 4.2.23
+    # (a quad-faced cube and a pentagon n-gon, both triangulated) that BMVert.index stays valid
+    # and unique with no explicit call -- triangulate() only adds edges/faces among the mesh's
+    # *existing* vertices, never inserting or reordering verts. Still calling index_update() here
+    # rather than relying on that: Blender's own bmesh docs don't guarantee .index stays valid
+    # across a topology-changing op without it, and the call is effectively free (O(vertex count)).
+    bm.verts.index_update()
     cache = []
     misses = 0
     for f in bm.faces:
