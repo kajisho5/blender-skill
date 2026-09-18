@@ -45,6 +45,7 @@ POINT_CLOUD_FIXTURE = ROOT / "tests" / "fixtures" / "points.ply"
 DIRTY_CUBE_FIXTURE = ROOT / "tests" / "fixtures" / "dirty_cube.blend"
 WIRE_MESH_FIXTURE = ROOT / "tests" / "fixtures" / "wire_mesh.blend"
 TINY_LEGIT_TRIANGLE_FIXTURE = ROOT / "tests" / "fixtures" / "tiny_legit_triangle.blend"
+VERTEX_CACHE_QUAD_FIXTURE = ROOT / "tests" / "fixtures" / "vertex_cache_quad.blend"
 
 
 def _blender_available() -> bool:
@@ -1329,6 +1330,85 @@ class TestToolchain(unittest.TestCase):
         info = json.loads(run("info.py", str(out), "--json").stdout)
         self.assertEqual(info["meshes"]["vertices"], 3)
         self.assertEqual(info["meshes"]["triangles"], 1)
+
+    def test_optimize_vertex_cache_report_matches_a_hand_computed_acmr(self):
+        # vertex_cache_quad.blend: two triangles sharing an edge, tri1=(A,B,C) tri2=(A,C,D), in
+        # this exact creation order. Hand-traced FIFO cache simulation (cache_size=32, well above
+        # this mesh's 4 vertices so no eviction occurs): tri1's A/B/C are all misses (cache
+        # empty) -- 3 misses. tri2's A and C are already cached -- hits; D is a miss -- 1 miss.
+        # Total 4 misses / 2 triangles = ACMR 2.0 exactly. No topology-changing flag is given, so
+        # acmr_before and acmr_after must be identical.
+        out = self.out / "quad_vcr.blend"
+        proc = run("optimize.py", str(VERTEX_CACHE_QUAD_FIXTURE), "-o", str(out), "--vertex-cache-report", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["vertex_cache_report"]), 1)
+        row = data["vertex_cache_report"][0]
+        self.assertAlmostEqual(row["acmr_before"], 2.0, places=9)
+        self.assertAlmostEqual(row["acmr_after"], 2.0, places=9)
+
+    def test_optimize_vertex_cache_report_is_empty_without_the_flag(self):
+        out = self.out / "quad_no_vcr.blend"
+        proc = run("optimize.py", str(VERTEX_CACHE_QUAD_FIXTURE), "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout)["vertex_cache_report"], [])
+
+    def test_optimize_vertex_cache_report_reflects_this_runs_own_topology_changes(self):
+        # highpoly_sphere.blend, decimated to 10%: acmr_before is measured on the pristine
+        # imported mesh, acmr_after on the same object post-decimate -- a real, different
+        # triangle order, so the two values are not required to match (unlike the no-op case
+        # above). 3.0 is ACMR's one real, provable upper bound (a triangle touches at most 3
+        # vertices, so it can contribute at most 3 misses, regardless of topology) -- 0.5 is only
+        # a common target for a large closed mesh, not a universal floor (see the next test), so
+        # it is deliberately not asserted here.
+        out = self.out / "sphere_vcr.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "highpoly_sphere.blend"), "-o", str(out),
+                   "--vertex-cache-report", "--decimate-ratio", "0.1", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["vertex_cache_report"]), 1)
+        row = data["vertex_cache_report"][0]
+        for acmr in (row["acmr_before"], row["acmr_after"]):
+            self.assertGreater(acmr, 0.0)
+            self.assertLessEqual(acmr, 3.0)
+
+    def test_optimize_vertex_cache_report_is_none_null_n_a_for_a_zero_triangle_mesh(self):
+        # wire_mesh.blend: the same real zero-face, zero-triangle open wire chain used by the
+        # --clean-mesh tests above, reused here for --vertex-cache-report's own zero-triangle
+        # path (previously only exercised by numeric fixtures) -- _vertex_cache_acmr returns
+        # None (nothing to report, not a divide-by-zero), which --json serializes as null and
+        # text mode prints as the literal "n/a" (confirmed against the real CLI before writing
+        # this test).
+        out_json = self.out / "wire_vcr.blend"
+        proc = run("optimize.py", str(WIRE_MESH_FIXTURE), "-o", str(out_json), "--vertex-cache-report", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["vertex_cache_report"]), 1)
+        row = data["vertex_cache_report"][0]
+        self.assertIsNone(row["acmr_before"])
+        self.assertIsNone(row["acmr_after"])
+
+        out_text = self.out / "wire_vcr_text.blend"
+        proc = run("optimize.py", str(WIRE_MESH_FIXTURE), "-o", str(out_text), "--vertex-cache-report")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("ACMR n/a -> n/a", proc.stdout)
+
+    def test_optimize_vertex_cache_report_acmr_can_score_below_the_common_05_target(self):
+        # vertex_cache_hub.blend: 6 vertices, all 20 possible triangular faces among them (a
+        # deliberately non-manifold "every combination" construction) -- a real, valid mesh whose
+        # hand-derivable best case (6 distinct vertices, all fit in a 32-entry cache with zero
+        # eviction, so total misses = 6) gives ACMR = 6/20 = 0.3, confirmed directly against a
+        # real Blender 4.2.23. 0.5 is documented as a common target, not a floor -- this is the
+        # regression test proving that claim, not just an assertion of it.
+        out = self.out / "hub_vcr.blend"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "vertex_cache_hub.blend"), "-o", str(out),
+                   "--vertex-cache-report", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["vertex_cache_report"]), 1)
+        row = data["vertex_cache_report"][0]
+        self.assertAlmostEqual(row["acmr_before"], 0.3, places=9)
+        self.assertLess(row["acmr_before"], 0.5)
 
     def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
         # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published
