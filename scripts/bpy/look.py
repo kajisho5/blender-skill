@@ -175,10 +175,18 @@ def _psnr(a: np.ndarray, b: np.ndarray) -> float:
     serialized as JSON (`json.dump`'s default `allow_nan=True` writes the bare token `Infinity`,
     which Python round-trips fine but is not valid per RFC 8259 -- a coding agent parsing this
     output with a strict JSON parser, e.g. JSON.parse in Node, would throw), so identical images
-    report the finite sentinel _PSNR_IDENTICAL_DB instead of float('inf')."""
+    report the finite sentinel _PSNR_IDENTICAL_DB instead of float('inf'). A non-finite MSE (an
+    actual inf/NaN pixel survived into `a`/`b` -- Image.pixels permits it, e.g. an HDR/EXR render
+    with a blown-out specular highlight, or a NaN from a divide-by-zero in shading) is reported as
+    NaN rather than raising: `math.log10(1.0 / mse)` is `math.log10(0.0)` when mse is inf, which
+    raises ValueError (confirmed on a real Blender 4.2.23 -- a genuinely non-finite pixel crashes
+    this call outright, not just risks an invalid JSON token), so that case is short-circuited
+    before ever reaching log10. Callers must check math.isfinite() before serializing the result."""
     mse = float(np.mean((a[..., :3] - b[..., :3]) ** 2))
     if mse == 0.0:
         return _PSNR_IDENTICAL_DB
+    if not math.isfinite(mse):
+        return float("nan")
     return min(10.0 * math.log10(1.0 / mse), _PSNR_IDENTICAL_DB)
 
 
@@ -221,8 +229,16 @@ def _mode_compare(args):
     b = _load_pixels(args["image_b"])
     score = {}
     if a.shape[:2] == b.shape[:2]:
-        score["psnr"] = _psnr(a, b)
-        score["ssim"] = _ssim(a, b)
+        psnr, ssim = _psnr(a, b), _ssim(a, b)
+        if math.isfinite(psnr) and math.isfinite(ssim):
+            score["psnr"] = psnr
+            score["ssim"] = ssim
+        else:
+            # An actual inf/NaN pixel (Image.pixels permits it -- an HDR/EXR render with a
+            # blown-out highlight, or a NaN from a divide-by-zero in shading) produced a
+            # non-finite score; json.dump would otherwise write the invalid-JSON tokens
+            # `Infinity`/`-Infinity`/`NaN` (RFC 8259 permits none of them).
+            score["score_skipped"] = "one or both images contain non-finite (inf/NaN) pixel values"
     else:
         score["score_skipped"] = "images have different pixel dimensions, cannot score"
     h = max(a.shape[0], b.shape[0])

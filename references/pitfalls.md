@@ -870,3 +870,23 @@ ones, confirmed against solid-color images' closed-form values and a real before
 render pair), but do not expect them to match `skimage.metrics.structural_similarity`'s output
 bit-for-bit on the same two images -- treat this tool's SSIM as a self-consistent relative
 similarity signal, not an interoperable implementation of the reference algorithm.
+
+## A NaN/inf pixel can reach PSNR/SSIM from a real file, not just a contrived array -- and math.log10(0.0) crashes, it doesn't return inf
+
+`Image.pixels` places no restriction on the float values it holds -- `_psnr`'s and `_ssim`'s
+first versions assumed every pixel was a normal finite float in [0, 1], which a real HDR/EXR
+render (a blown-out specular highlight, or a NaN from a compositing divide-by-zero) can violate.
+Confirmed two distinct real failure modes on a real Blender 4.2.23, not just theoretical: (1) a
+literal NaN pixel survives Blender's own OPEN_EXR writer/reader round trip unchanged (a fixture
+loaded back this way, `tests/fixtures/nan_pixel.exr`, still has `isnan().any() == True`), making
+`_psnr`/`_ssim` return NaN, which `json.dump` serializes as the bare token `NaN` -- invalid JSON
+per RFC 8259; (2) a literal `inf` pixel does *not* survive that same EXR round trip (Blender's own
+writer clamps it to a large finite value on save), but an in-memory array can still hold one
+(confirmed via direct `.pixels.foreach_set()`, no file involved) -- and if it ever reaches `_psnr`
+with an infinite MSE, `math.log10(1.0 / mse)` becomes `math.log10(0.0)`, which *raises*
+`ValueError: math domain error` rather than returning `inf` (Python's `math.log10` only special-
+cases NaN input, not the zero-argument case that an infinite MSE produces). Caught by review;
+fixed by short-circuiting `_psnr` on a non-finite MSE (returns NaN instead of calling `log10`),
+and by having `_mode_compare` check `math.isfinite()` on both scores before including them,
+falling back to `score_skipped` otherwise -- never assume image pixel data is well-behaved just
+because it loaded without an error.

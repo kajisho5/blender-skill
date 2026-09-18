@@ -1384,6 +1384,23 @@ class TestToolchain(unittest.TestCase):
         self.assertNotIn("ssim", data)
         self.assertIn("score_skipped", data)
 
+    def test_look_compare_skips_the_score_for_a_real_nan_pixel_instead_of_crashing_or_leaking_it(self):
+        # nan_pixel.exr: a real 8x8 float EXR with one literal NaN pixel (the kind a compositing
+        # divide-by-zero, or a corrupted render, can genuinely produce), saved and reloaded
+        # through Blender's own OPEN_EXR writer/reader -- confirmed the NaN survives that real
+        # round trip (an all-inf pixel does not; Blender's own EXR save clamps inf to a huge but
+        # finite value, so this fixture uses NaN specifically). Pre-fix, this crashed outright:
+        # a non-finite MSE makes _psnr's `math.log10(1.0 / mse)` call `math.log10(0.0)` (mse=inf)
+        # or propagate NaN through _ssim, either of which would have serialized JSON's non-tokens
+        # `Infinity`/`NaN` (invalid per RFC 8259) had it not crashed first. Caught by review.
+        proc = run("look.py", "--compare", str(ROOT / "tests" / "fixtures" / "nan_pixel.exr"),
+                   str(ROOT / "tests" / "fixtures" / "nan_pixel.exr"), "-o", str(self.out / "cmp.png"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertNotIn("psnr", data)
+        self.assertNotIn("ssim", data)
+        self.assertEqual(data["score_skipped"], "one or both images contain non-finite (inf/NaN) pixel values")
+
     def test_look_compare_scores_a_real_decimation_pass_between_the_two_extremes(self):
         # A real before/after render pair (highpoly_sphere.blend, wireframe render, decimated
         # 20,480 -> ~410 triangles) should score well below the identical-image sentinel but well
