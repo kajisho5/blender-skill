@@ -128,8 +128,12 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   up a mesh (`--clean-mesh`: orphan/loose vertices touching no face at all, plus degenerate
   zero-area faces -- a no-op on a point cloud, since every one of its vertices touches zero faces
   by definition; runs first so a decimate ratio/triangle budget is derived from a count that
-  excludes dead geometry), fill boundary-edge holes (`--fill-holes`), bake unapplied scale into
-  the mesh (`--fix-scale`),
+  excludes dead geometry), report vertex-cache efficiency (`--vertex-cache-report`: each mesh
+  object's Average Cache Miss Ratio -- a FIFO 32-entry vertex-cache simulation over the current
+  triangle order, 0.5 best/3.0 worst -- before and after this run's own topology changes; reports
+  only, doesn't reorder itself, since `--meshopt` already delegates to gltf-transform's own
+  cache-aware `reorder` command), fill boundary-edge holes (`--fill-holes`), bake unapplied scale
+  into the mesh (`--fix-scale`),
   recenter an object's origin without moving its geometry (`--origin center|bottom`), cap texture
   resolution, purge orphan data, thin a point cloud by voxel-grid downsampling
   (`--point-thin-voxel SIZE` -- a no-op on any mesh that has faces, since that's what

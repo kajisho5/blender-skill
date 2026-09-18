@@ -1080,6 +1080,50 @@ def _reassign_material_users(dup, canonical) -> None:
     dup.user_remap(canonical)
 
 
+_VERTEX_CACHE_SIZE = 32  # a common assumption for a modern GPU's post-transform vertex cache
+
+
+def _vertex_cache_acmr(obj, cache_size=_VERTEX_CACHE_SIZE):
+    """Average Cache Miss Ratio (ACMR) for `obj`'s current triangle order: simulates a FIFO
+    vertex cache of `cache_size` entries, walking the mesh's triangles in their current
+    submission order and counting a cache miss whenever a triangle references a vertex not
+    already in the cache (a hit never reorders the cache -- real FIFO, not LRU). ACMR = total
+    misses / triangle count; ranges from the theoretical best 0.5 (a closed mesh with the typical
+    average vertex valence of 6, each vertex reused ~6 times before eviction) to the worst case
+    3.0 (every vertex of every triangle misses -- no cache reuse at all, e.g. triangles ordered
+    with no locality). None on a mesh with zero triangles (nothing to report). RM-042 -- this
+    tool only *reports* the metric; `--meshopt` (gltf-transform's own `reorder` command) does the
+    actual cache-aware reordering.
+
+    Computed on Blender's own internal per-position (welded) vertex topology via a temporary
+    bmesh -- not the fully split vertex buffer a real glTF/FBX export produces, which duplicates
+    a vertex at every hard-edge/UV-seam discontinuity (see references/pitfalls.md): a useful
+    relative signal for this tool's own triangle-order changes, not a bit-exact prediction of the
+    exported file's real GPU cache behavior.
+    """
+    if obj.type != "MESH":
+        return None
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    if not bm.faces:
+        bm.free()
+        return None
+    cache = []
+    misses = 0
+    for f in bm.faces:
+        for v in f.verts:
+            if v.index in cache:
+                continue
+            misses += 1
+            cache.append(v.index)
+            if len(cache) > cache_size:
+                cache.pop(0)
+    triangle_count = len(bm.faces)
+    bm.free()
+    return misses / triangle_count
+
+
 def _merge_identical_materials() -> list:
     """Merges every group of separate Material datablocks that are fully identical
     (_material_fully_identical) onto one canonical datablock, reassigning every mesh-data material
@@ -1145,6 +1189,10 @@ def run(args):
 
     mesh_objs = [o for o in bpy.data.objects if o.type == "MESH"]
     before_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
+    vertex_cache_report = []
+    acmr_before = {}
+    if args.get("vertex_cache_report"):
+        acmr_before = {o: _vertex_cache_acmr(o) for o in mesh_objs}
 
     # A preset's triangle_budget is an *absolute* count a real platform publishes (see PRESETS) --
     # turned into an actual ratio further below, against this file's own real triangle count at
@@ -1274,6 +1322,13 @@ def run(args):
         materials_merged = _merge_identical_materials()
 
     after_tris = sum(_compat.object_triangle_count(o) for o in mesh_objs)
+    if args.get("vertex_cache_report"):
+        for o in mesh_objs:
+            vertex_cache_report.append({
+                "name": o.name,
+                "acmr_before": acmr_before.get(o),
+                "acmr_after": _vertex_cache_acmr(o),
+            })
     export_kwargs = {}
     if args.get("webp") and args["output_format"] == "gltf":
         # export_image_add_webp/export_image_webp_fallback both default to False already (a
@@ -1289,6 +1344,7 @@ def run(args):
         "triangles_after": after_tris,
         "vertices_welded": welded_total,
         "loose_vertices_removed": loose_vertices_removed_total,
+        "vertex_cache_report": vertex_cache_report,
         "degenerate_faces_removed": degenerate_faces_removed_total,
         "holes_filled": holes_filled_total,
         "scales_fixed": scales_fixed_total,

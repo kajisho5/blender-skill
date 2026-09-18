@@ -936,3 +936,16 @@ point, while `dist=0.0` leaves that same real triangle untouched *and* still cor
 genuinely zero-area face (three well-separated, merely collinear points -- mechanism (2), never
 gated by `dist` at all) exactly as before. Fixed by using `dist=0.0`, disabling only the
 short-edge-collapse mechanism this feature never needed. Caught by review.
+
+## Vertex-cache ACMR is computed on Blender's own welded topology, not the real exported vertex buffer
+
+`--vertex-cache-report`'s ACMR (Average Cache Miss Ratio) simulation walks a temporary bmesh's
+current triangle order -- Blender's own internal, per-position (welded) vertex representation.
+A real glTF/FBX export does not use that same vertex buffer: it duplicates a vertex at every
+hard-edge/UV-seam discontinuity (split normals, a UV seam, a per-face-corner color), so the
+*actual* GPU-submitted index buffer for the exported file has more distinct vertex entries -- and
+therefore a real ACMR this report does not measure. Treat this metric as a relative signal for
+this tool's own triangle-order changes (did `--clean-mesh`/`--weld-doubles`/decimation improve or
+worsen cache locality on the mesh as authored), not a prediction of the exported file's real
+GPU cache behavior -- `--meshopt` (gltf-transform's own `reorder`, operating on the real exported
+index buffer) is the thing that actually optimizes for that.
