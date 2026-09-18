@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.28.0...blender-skill-v0.29.0) (2026-09-18)
+
+
+### Features
+
+* **optimize:** RM-042 vertex cache (ACMR) report ([#157](https://github.com/kajisho5/blender-skill/issues/157)) ([4920e7a](https://github.com/kajisho5/blender-skill/commit/4920e7a4bfa5ccd87915e63031978dc5803a1e70))
+
 ## [0.28.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.27.0...blender-skill-v0.28.0) (2026-09-18)
 
 
