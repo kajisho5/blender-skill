@@ -99,7 +99,15 @@ def _weld_and_triangulate(obj, weld: bool, triangulate: bool, recalc_normals: bo
     return removed
 
 
-_DEGENERATE_DIST = 1e-4  # Blender's own dissolve_degenerate default; matches the dist used below
+_DEGENERATE_DIST = 0.0  # see _clean_mesh's docstring -- NOT bpy.ops.mesh.dissolve_degenerate's own
+# 1e-4 default: that default is a short-*edge*-collapse tolerance, which also collapses a real,
+# legitimately tiny (but positive-area) triangle -- confirmed directly (edges of 5e-5 units each,
+# a real ~1.25e-9 area face) collapses away entirely at dist=1e-4. 0.0 disables that edge-collapse
+# mechanism outright while leaving bmesh.ops.dissolve_degenerate's *other*, separate mechanism (an
+# exact-area "degenerate ear" check, not gated by dist at all) doing the actual work this feature
+# needs -- confirmed it still correctly removes a real zero-area face (three well-separated,
+# merely collinear points, no edge anywhere near degenerate-short) at dist=0.0, identically to
+# 1e-4. Caught by review.
 
 
 def _clean_mesh(obj) -> tuple[int, int]:
@@ -116,10 +124,19 @@ def _clean_mesh(obj) -> tuple[int, int]:
     sitting in the output mesh. A run on an already-clean mesh (a real sphere, no defects) is
     confirmed to touch nothing: same vertex/edge/face counts before and after.
 
-    A no-op (returns (0, 0)) on a point cloud (a PLY vertices-only mesh, no faces at all -- see
-    _thin_point_cloud's own len(obj.data.polygons) == 0 check): every one of its vertices touches
-    zero faces by definition, so without this guard the "orphan vertex" pass above would delete
-    the entire point cloud rather than skip it. Caught before shipping, not by review.
+    A no-op (returns (0, 0)) on ANY mesh with zero faces -- a point cloud (a PLY vertices-only
+    mesh, no faces at all -- see _thin_point_cloud's own len(obj.data.polygons) == 0 check), but
+    also a genuine wire mesh (edges but still no faces, e.g. a glTF LINES-primitive import, a
+    skeleton/cage visualization): every one of its vertices touches zero faces by definition
+    (the same "orphan vertex" criterion above), so without this guard on ANY zero-face mesh, not
+    just a point cloud specifically, the orphan-vertex pass would delete the whole thing outright
+    -- confirmed directly with a hand-built 4-vertex/3-edge open wire chain: 0 vertices survived.
+    Deliberately not narrowed to "no faces AND no edges" (i.e. still skipping a wire mesh) -- that
+    narrower guard was suggested in review, but confirmed it reintroduces exactly this same
+    whole-object deletion for any wire mesh, since the "orphan vertex" criterion here is
+    necessarily face-based (see the note above on why edge-based alone would miss real leftover
+    geometry after dissolve_degenerate), not edge-based. Caught before shipping and re-verified
+    against review's own suggestion, not just dismissed.
     """
     if len(obj.data.polygons) == 0:
         return 0, 0
