@@ -1372,6 +1372,27 @@ class TestToolchain(unittest.TestCase):
             self.assertGreater(acmr, 0.0)
             self.assertLessEqual(acmr, 3.0)
 
+    def test_optimize_vertex_cache_report_is_none_null_n_a_for_a_zero_triangle_mesh(self):
+        # wire_mesh.blend: the same real zero-face, zero-triangle open wire chain used by the
+        # --clean-mesh tests above, reused here for --vertex-cache-report's own zero-triangle
+        # path (previously only exercised by numeric fixtures) -- _vertex_cache_acmr returns
+        # None (nothing to report, not a divide-by-zero), which --json serializes as null and
+        # text mode prints as the literal "n/a" (confirmed against the real CLI before writing
+        # this test).
+        out_json = self.out / "wire_vcr.blend"
+        proc = run("optimize.py", str(WIRE_MESH_FIXTURE), "-o", str(out_json), "--vertex-cache-report", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(len(data["vertex_cache_report"]), 1)
+        row = data["vertex_cache_report"][0]
+        self.assertIsNone(row["acmr_before"])
+        self.assertIsNone(row["acmr_after"])
+
+        out_text = self.out / "wire_vcr_text.blend"
+        proc = run("optimize.py", str(WIRE_MESH_FIXTURE), "-o", str(out_text), "--vertex-cache-report")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("ACMR n/a -> n/a", proc.stdout)
+
     def test_optimize_vertex_cache_report_acmr_can_score_below_the_common_05_target(self):
         # vertex_cache_hub.blend: 6 vertices, all 20 possible triangular faces among them (a
         # deliberately non-manifold "every combination" construction) -- a real, valid mesh whose
