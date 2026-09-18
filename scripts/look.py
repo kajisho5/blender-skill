@@ -25,7 +25,7 @@ def main() -> int:
     ap.add_argument("--uv", action="store_true", help="UV layout as SVG (headless Blender can't rasterize this to PNG -- see references/pitfalls.md)")
     ap.add_argument("--wireframe", action="store_true", help="a render with every mesh shown as wireframe")
     ap.add_argument("--textures", action="store_true", help="a grid of every texture used in the file")
-    ap.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), help="two existing images placed side by side")
+    ap.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), help="two existing images placed side by side, with a PSNR/SSIM similarity score when they share pixel dimensions")
     ap.add_argument("-o", "--out", required=True)
     _common.add_common_args(ap, dry_run=False, progress=False)
     args = ap.parse_args()
@@ -69,6 +69,10 @@ def main() -> int:
         print(f"skipped: {data['skipped']}")
     else:
         print(f"wrote {args.out} ({mode})")
+        if "psnr" in data:
+            print(f"  psnr: {data['psnr']:.2f} dB, ssim: {data['ssim']:.4f}")
+        elif "score_skipped" in data:
+            print(f"  score: skipped ({data['score_skipped']})")
     return 0
 
 

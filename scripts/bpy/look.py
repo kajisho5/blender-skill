@@ -9,8 +9,10 @@
   written back to the source file).
 - textures: a grid of every image in bpy.data.images, downscaled and composited with numpy
   (bundled with Blender's own Python -- this runs inside Blender, not the stdlib-only host).
-- compare: two existing images placed side by side, for a before/after look.
+- compare: two existing images placed side by side, for a before/after look -- also reports a
+  PSNR/SSIM similarity score (see _psnr/_ssim) when both images are the same pixel dimensions.
 """
+import math
 import sys
 from pathlib import Path
 
@@ -159,18 +161,95 @@ def _load_pixels(path: str) -> np.ndarray:
     return np.flipud(px)
 
 
+def _to_luminance(rgba: np.ndarray) -> np.ndarray:
+    """Rec. 601 luma -- SSIM is defined on a single intensity channel, not per-channel RGB."""
+    return rgba[..., 0] * 0.299 + rgba[..., 1] * 0.587 + rgba[..., 2] * 0.114
+
+
+_PSNR_IDENTICAL_DB = 100.0  # sentinel for mse=0 -- see _psnr's docstring
+
+
+def _psnr(a: np.ndarray, b: np.ndarray) -> float:
+    """Peak Signal-to-Noise Ratio in dB, on the RGB channels of two same-shape float32 images
+    normalized to [0, 1] (MAX=1.0). The textbook definition is +inf at mse=0, but this result is
+    serialized as JSON (`json.dump`'s default `allow_nan=True` writes the bare token `Infinity`,
+    which Python round-trips fine but is not valid per RFC 8259 -- a coding agent parsing this
+    output with a strict JSON parser, e.g. JSON.parse in Node, would throw), so identical images
+    report the finite sentinel _PSNR_IDENTICAL_DB instead of float('inf'). A non-finite MSE (an
+    actual inf/NaN pixel survived into `a`/`b` -- Image.pixels permits it, e.g. an HDR/EXR render
+    with a blown-out specular highlight, or a NaN from a divide-by-zero in shading) is reported as
+    NaN rather than raising: `math.log10(1.0 / mse)` is `math.log10(0.0)` when mse is inf, which
+    raises ValueError (confirmed on a real Blender 4.2.23 -- a genuinely non-finite pixel crashes
+    this call outright, not just risks an invalid JSON token), so that case is short-circuited
+    before ever reaching log10. Callers must check math.isfinite() before serializing the result."""
+    mse = float(np.mean((a[..., :3] - b[..., :3]) ** 2))
+    if mse == 0.0:
+        return _PSNR_IDENTICAL_DB
+    if not math.isfinite(mse):
+        return float("nan")
+    return min(10.0 * math.log10(1.0 / mse), _PSNR_IDENTICAL_DB)
+
+
+_SSIM_WINDOW = 7  # odd, so _box_local_mean's padding is symmetric
+
+
+def _box_local_mean(img: np.ndarray, window: int) -> np.ndarray:
+    """Local mean of `img` (2D) under a `window`x`window` uniform box, same shape as `img` (edge
+    padding, i.e. each border pixel's window clamps to the nearest real edge pixel instead of
+    reading zeros)."""
+    pad = window // 2
+    padded = np.pad(img, pad, mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(padded, (window, window))
+    return windows.mean(axis=(-1, -2))
+
+
+def _ssim(a: np.ndarray, b: np.ndarray) -> float:
+    """Structural Similarity Index of two same-shape RGBA float32 images, on Rec.601 luminance.
+    Local statistics (mean/variance/covariance) use a uniform box window via _box_local_mean --
+    the SSIM literature's reference implementation uses a Gaussian window instead, so this is a
+    deliberate simplification to avoid adding a scipy dependency; scores trend the same way but
+    won't match a scipy/skimage `structural_similarity` call bit-for-bit."""
+    la = _to_luminance(a)
+    lb = _to_luminance(b)
+    mu_a = _box_local_mean(la, _SSIM_WINDOW)
+    mu_b = _box_local_mean(lb, _SSIM_WINDOW)
+    var_a = _box_local_mean(la * la, _SSIM_WINDOW) - mu_a * mu_a
+    var_b = _box_local_mean(lb * lb, _SSIM_WINDOW) - mu_b * mu_b
+    cov_ab = _box_local_mean(la * lb, _SSIM_WINDOW) - mu_a * mu_b
+    c1 = 0.01 ** 2
+    c2 = 0.03 ** 2
+    ssim_map = ((2 * mu_a * mu_b + c1) * (2 * cov_ab + c2)) / (
+        (mu_a ** 2 + mu_b ** 2 + c1) * (var_a + var_b + c2)
+    )
+    return float(np.mean(ssim_map))
+
+
 def _mode_compare(args):
     a = _load_pixels(args["image_a"])
     b = _load_pixels(args["image_b"])
+    score = {}
+    if a.shape[:2] == b.shape[:2]:
+        psnr, ssim = _psnr(a, b), _ssim(a, b)
+        if math.isfinite(psnr) and math.isfinite(ssim):
+            score["psnr"] = psnr
+            score["ssim"] = ssim
+        else:
+            # An actual inf/NaN pixel (Image.pixels permits it -- an HDR/EXR render with a
+            # blown-out highlight, or a NaN from a divide-by-zero in shading) produced a
+            # non-finite score; json.dump would otherwise write the invalid-JSON tokens
+            # `Infinity`/`-Infinity`/`NaN` (RFC 8259 permits none of them).
+            score["score_skipped"] = "one or both images contain non-finite (inf/NaN) pixel values"
+    else:
+        score["score_skipped"] = "images have different pixel dimensions, cannot score"
     h = max(a.shape[0], b.shape[0])
-    a = _resize(a, (a.shape[1], h))
-    b = _resize(b, (b.shape[1], h))
-    canvas = np.zeros((h, a.shape[1] + b.shape[1] + 4, 4), dtype=np.float32)
+    a_fit = _resize(a, (a.shape[1], h))
+    b_fit = _resize(b, (b.shape[1], h))
+    canvas = np.zeros((h, a_fit.shape[1] + b_fit.shape[1] + 4, 4), dtype=np.float32)
     canvas[..., 3] = 1.0
-    canvas[:, :a.shape[1]] = a
-    canvas[:, a.shape[1] + 4:] = b
+    canvas[:, :a_fit.shape[1]] = a_fit
+    canvas[:, a_fit.shape[1] + 4:] = b_fit
     _save_png(canvas, args["output"])
-    return {"width": canvas.shape[1], "height": canvas.shape[0]}
+    return {"width": canvas.shape[1], "height": canvas.shape[0], **score}
 
 
 def _save_png(pixels: np.ndarray, output: str) -> None:

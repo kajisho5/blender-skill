@@ -9,10 +9,12 @@ Usage:
   python3 tests/test_all.py
 """
 import json
+import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,6 +56,23 @@ def run(*argv, cwd=None):
     proc = subprocess.run([sys.executable, str(ROOT / "scripts" / argv[0])] + list(argv[1:]),
                            capture_output=True, text=True, cwd=cwd)
     return proc
+
+
+def _write_solid_png(path, w, h, rgb) -> None:
+    """A raw, uncompressed-color-data 8-bit RGB PNG (stdlib zlib/struct only, no Blender/numpy)
+    holding exactly the given byte triple at every pixel -- so a test's hand-computed expected
+    PSNR/SSIM can be derived from a known, exact rgb/255 float rather than whatever Blender's own
+    PNG encoder/color management would produce for a value like 0.5 (confirmed on a real Blender
+    4.2.23: bpy.data.images.load returns rgb/255 directly for a file built this way, with no sRGB
+    gamma curve applied despite the image's colorspace defaulting to "sRGB")."""
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+
+    row = bytes([0]) + bytes(rgb) * w  # filter type 0 (None) prefix per scanline
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)  # 8-bit depth, color type 2 = RGB
+    png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+           + chunk(b"IDAT", zlib.compress(row * h, 9)) + chunk(b"IEND", b""))
+    Path(path).write_bytes(png)
 
 
 class TestUsdzValidate(unittest.TestCase):
@@ -1317,6 +1336,118 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         data = json.loads(proc.stdout)
         self.assertEqual(data["overall"], "PASS")
+
+    def test_look_compare_scores_inverted_solid_colors_at_the_theoretical_floor(self):
+        # Solid black vs. solid white, same dims -- the maximum possible per-pixel error (a
+        # normalized-float MSE of exactly 1.0), so PSNR is exactly 10*log10(1/1) = 0 dB and SSIM
+        # reduces to the constant-image closed form C1/(1+C1) (means 0 and 1, variances and
+        # covariance all 0, so only the C1/C2 stabilizer terms survive) -- both hand-derived, not
+        # just asserted "low".
+        black = self.out / "black.png"
+        white = self.out / "white.png"
+        _write_solid_png(black, 8, 8, (0, 0, 0))
+        _write_solid_png(white, 8, 8, (255, 255, 255))
+        proc = run("look.py", "--compare", str(black), str(white), "-o", str(self.out / "cmp.png"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertAlmostEqual(data["psnr"], 0.0, places=6)
+        self.assertAlmostEqual(data["ssim"], 9.999000099990002e-05, places=9)
+
+    def test_look_compare_scores_identical_images_at_the_capped_sentinel(self):
+        # Two loads of the same file: MSE is exactly 0, which the textbook PSNR formula sends to
+        # +inf -- serialized as the finite _PSNR_IDENTICAL_DB sentinel instead (see _psnr's
+        # docstring: json.dump's default allow_nan=True would otherwise emit the bare token
+        # `Infinity`, which round-trips in Python but isn't valid JSON per RFC 8259 and would
+        # break a strict JSON parser reading this tool's output). SSIM's constant-image closed
+        # form is exactly 1.0 here (means/variances/covariance all match exactly).
+        same = self.out / "same.png"
+        _write_solid_png(same, 8, 8, (60, 120, 200))
+        proc = run("look.py", "--compare", str(same), str(same), "-o", str(self.out / "cmp.png"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["psnr"], 100.0)
+        self.assertEqual(data["ssim"], 1.0)
+
+    def test_look_compare_prints_the_score_in_text_mode(self):
+        # Every other --compare test above passes --json, so scripts/look.py's own non-JSON text
+        # branch (main()'s `if "psnr" in data: print(f"  psnr: ...")`) was never actually
+        # exercised -- a regression in that f-string's formatting would have passed unnoticed.
+        black = self.out / "black_text.png"
+        white = self.out / "white_text.png"
+        _write_solid_png(black, 8, 8, (0, 0, 0))
+        _write_solid_png(white, 8, 8, (255, 255, 255))
+        out = self.out / "cmp_text.png"
+        proc = run("look.py", "--compare", str(black), str(white), "-o", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"wrote {out} (compare)", proc.stdout)
+        self.assertIn("psnr: 0.00 dB, ssim: 0.0001", proc.stdout)
+
+    def test_look_compare_prints_the_skip_reason_in_text_mode(self):
+        small = self.out / "small_text.png"
+        big = self.out / "big_text.png"
+        _write_solid_png(small, 4, 4, (10, 10, 10))
+        _write_solid_png(big, 8, 8, (10, 10, 10))
+        out = self.out / "cmp_text_skip.png"
+        proc = run("look.py", "--compare", str(small), str(big), "-o", str(out))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn(f"wrote {out} (compare)", proc.stdout)
+        self.assertIn("score: skipped (images have different pixel dimensions, cannot score)", proc.stdout)
+
+    def test_look_compare_skips_the_score_for_mismatched_dimensions(self):
+        # PSNR/SSIM are only defined pixel-for-pixel -- comparing a 4x4 to an 8x8 must report why
+        # no score was computed instead of silently scoring the two images after --compare's own
+        # side-by-side resize (which would score the resize's own interpolation artifacts, not
+        # any real difference between the two source images).
+        small = self.out / "small.png"
+        big = self.out / "big.png"
+        _write_solid_png(small, 4, 4, (10, 10, 10))
+        _write_solid_png(big, 8, 8, (10, 10, 10))
+        proc = run("look.py", "--compare", str(small), str(big), "-o", str(self.out / "cmp.png"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertNotIn("psnr", data)
+        self.assertNotIn("ssim", data)
+        self.assertIn("score_skipped", data)
+
+    def test_look_compare_skips_the_score_for_a_real_nan_pixel_instead_of_crashing_or_leaking_it(self):
+        # nan_pixel.exr: a real 8x8 float EXR with one literal NaN pixel (the kind a compositing
+        # divide-by-zero, or a corrupted render, can genuinely produce), saved and reloaded
+        # through Blender's own OPEN_EXR writer/reader -- confirmed the NaN survives that real
+        # round trip (an all-inf pixel does not; Blender's own EXR save clamps inf to a huge but
+        # finite value, so this fixture uses NaN specifically). Pre-fix, this crashed outright:
+        # a non-finite MSE makes _psnr's `math.log10(1.0 / mse)` call `math.log10(0.0)` (mse=inf)
+        # or propagate NaN through _ssim, either of which would have serialized JSON's non-tokens
+        # `Infinity`/`NaN` (invalid per RFC 8259) had it not crashed first. Caught by review.
+        proc = run("look.py", "--compare", str(ROOT / "tests" / "fixtures" / "nan_pixel.exr"),
+                   str(ROOT / "tests" / "fixtures" / "nan_pixel.exr"), "-o", str(self.out / "cmp.png"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertNotIn("psnr", data)
+        self.assertNotIn("ssim", data)
+        self.assertEqual(data["score_skipped"], "one or both images contain non-finite (inf/NaN) pixel values")
+
+    def test_look_compare_scores_a_real_decimation_pass_between_the_two_extremes(self):
+        # A real before/after render pair (highpoly_sphere.blend, wireframe render, decimated
+        # 20,480 -> ~410 triangles) should score well below the identical-image sentinel but well
+        # above the solid-black-vs-white floor -- a sanity check on genuinely varying pixel data,
+        # not just the constant-color closed forms the other tests hand-derive exactly.
+        sphere = ROOT / "tests" / "fixtures" / "highpoly_sphere.blend"
+        decimated = self.out / "sphere_decimated.blend"
+        proc = run("optimize.py", str(sphere), "-o", str(decimated), "--decimate-ratio", "0.02", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+        before_png = self.out / "before.png"
+        after_png = self.out / "after.png"
+        self.assertEqual(run("look.py", str(sphere), "--wireframe", "-o", str(before_png), "--fast").returncode, 0)
+        self.assertEqual(run("look.py", str(decimated), "--wireframe", "-o", str(after_png), "--fast").returncode, 0)
+
+        proc = run("look.py", "--compare", str(before_png), str(after_png), "-o", str(self.out / "cmp.png"), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertLess(data["psnr"], 100.0)
+        self.assertGreater(data["psnr"], 0.0)
+        self.assertLess(data["ssim"], 1.0)
+        self.assertGreater(data["ssim"], 9.999000099990002e-05)
 
     def test_batch_recipe_over_a_folder(self):
         in_dir = self.out / "in"
