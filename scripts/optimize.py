@@ -17,6 +17,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --origin bottom
   python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
   python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --generate-mipmaps mips/
   python3 scripts/optimize.py model.glb -o model_optimized.glb --keyframe-decimate 0.01
   python3 scripts/optimize.py model.glb -o model_optimized.glb --remove-unused-shape-keys
   python3 scripts/optimize.py model.glb -o model_optimized.glb --instance-duplicate-meshes
@@ -77,6 +78,7 @@ def main() -> int:
     ap.add_argument("--draco", action="store_true", help="compress geometry with Draco (delegates to gltf-transform; glb/gltf output only)")
     ap.add_argument("--meshopt", action="store_true", help="compress geometry/animation with Meshopt (delegates to gltf-transform; glb/gltf output only; Blender itself cannot re-import the result -- see references/pitfalls.md)")
     ap.add_argument("--ktx2", action="store_true", help="compress textures to KTX2/Basis (delegates to gltf-transform + the KTX-Software `ktx` CLI; glb/gltf output only)")
+    ap.add_argument("--generate-mipmaps", metavar="DIR", help="pre-generate the full mip chain (level 0 = this run's own final texture size -- after any --texture-max/--texture-auto-resolution resize -- each level independently halved per dimension, floor-rounded, down to 1x1) for every texture a mesh object's material actually references, as separate PNG files under DIR (created if missing; one subdirectory-free file per level, named '<texture>_mip<N>.png'). Uses Blender's own Image.scale(), a real box/bilinear filter, not a naive nearest-neighbor resize -- for a pipeline/engine that needs mips pre-baked as loose files rather than generated at runtime or embedded in a container format. --ktx2 already embeds its own generated mip chain in the compressed KTX2 texture -- use this instead only when you need the mips as standalone files (e.g. for a custom/non-KTX2 pipeline).")
     _common.add_common_args(ap, fast=False, progress=False)
     args = ap.parse_args()
 
@@ -119,6 +121,7 @@ def main() -> int:
             "remove_unused_shape_keys": args.remove_unused_shape_keys,
             "instance_duplicate_meshes": args.instance_duplicate_meshes,
             "merge_materials": args.merge_materials,
+            "mipmap_dir": str(Path(args.generate_mipmaps).resolve()) if args.generate_mipmaps else None,
         }
         if args.dry_run:
             print(json.dumps({"args": bpy_args}, indent=2))
@@ -190,6 +193,8 @@ def main() -> int:
         for t in data["textures_resized"]:
             cap_note = f" (auto cap {t['cap']})" if "cap" in t else ""
             print(f"  texture {t['name']}: {t['from']} -> {t['to']}{cap_note}")
+        for m in data["mipmaps_generated"]:
+            print(f"  mipmaps for {m['name']}: {len(m['levels'])} level(s) ({m['width']}x{m['height']} down to 1x1) -> {args.generate_mipmaps}")
         if args.webp:
             before, after = data.get("texture_bytes_before"), data.get("texture_bytes_after")
             if before is not None and after is not None:

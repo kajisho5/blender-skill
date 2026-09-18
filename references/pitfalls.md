@@ -965,3 +965,23 @@ possible triangular faces among them -- every triangle formed from that same sma
 scores ACMR 0.3 on a real Blender 4.2.23, genuinely below 0.5. The one real, provable bound is the
 *worst* case, 3.0 -- a triangle only ever touches 3 vertices, so it can contribute at most 3
 misses, regardless of topology. Caught by review; don't assert or document 0.5 as a floor.
+
+## bpy.types.Image.copy() does not inherit a prior in-place Image.scale() call
+
+`--generate-mipmaps` builds each texture's mip chain on a throwaway `img.copy()`, scaled down
+level by level, so the real texture still referenced by this run's own export is never mutated.
+The very first version of this feature assumed the copy would start out at whatever size `img`
+currently reported -- including a size an *earlier* `img.scale(w, h)` call (e.g. from
+`--texture-max`) had already produced in place -- and only called `.scale()` on the copy from
+level 1 onward, treating level 0 as already correct.
+
+That assumption is wrong. Confirmed directly on a real Blender 4.2.23: a 64x64 image scaled in
+place to 16x16 via `img.scale(16, 16)`, then copied via `img.copy()`, comes back as a **64x64**
+copy -- `Image.copy()` re-derives the new datablock's pixel data from the image's own original
+backing buffer, not from whatever a prior runtime `.scale()` mutated it to. A dedicated regression
+test (mip chain on a texture already resized by `--texture-max` in the same run) caught this
+immediately: level 0's own PNG file on disk came out at the texture's *original* pre-resize
+resolution, silently mismatched against the JSON summary's own (correctly-computed) reported
+size. Fixed by always calling `copy.scale(w, h)` explicitly, even for level 0 -- never assume a
+freshly `.copy()`-ed image inherits any runtime state (including size) a prior `.scale()` call
+left on the source it was copied from.
