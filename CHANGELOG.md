@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.27.0...blender-skill-v0.28.0) (2026-09-18)
+
+
+### Features
+
+* **optimize:** RM-041 mesh cleanup (orphan vertices, degenerate faces) ([#155](https://github.com/kajisho5/blender-skill/issues/155)) ([029abec](https://github.com/kajisho5/blender-skill/commit/029abece61d73696f711414d7b596aa2f55019e1))
+
 ## [0.27.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.26.0...blender-skill-v0.27.0) (2026-09-18)
 
 
