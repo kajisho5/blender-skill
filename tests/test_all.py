@@ -88,11 +88,11 @@ def _png_dims(path) -> tuple:
     return struct.unpack(">II", header[16:24])
 
 
-def _glb_image_dims(path, image_index=0) -> tuple:
-    """(width, height) of the Nth embedded image in a .glb, read directly from the file's own
-    JSON+BIN chunks and that image's real PNG bytes -- confirms what the exporter actually wrote
-    to the container, not what Blender's own in-memory Image datablock reports (which needs its
-    lazy pixel data force-loaded first to even have a non-zero .size -- see look.py)."""
+def _glb_image_png_bytes(path, image_index=0) -> bytes:
+    """The Nth embedded image's raw PNG file bytes, extracted directly from a .glb's own
+    JSON+BIN chunks -- what the exporter actually wrote to the container, not what Blender's own
+    in-memory Image datablock reports (which needs its lazy pixel data force-loaded first to
+    even have a non-zero .size -- see look.py)."""
     with open(path, "rb") as f:
         f.read(12)
         json_len, _json_type = struct.unpack("<II", f.read(8))
@@ -102,8 +102,35 @@ def _glb_image_dims(path, image_index=0) -> tuple:
     image = gltf["images"][image_index]
     view = gltf["bufferViews"][image["bufferView"]]
     offset = view.get("byteOffset", 0)
-    png_bytes = bin_chunk[offset:offset + view["byteLength"]]
-    return struct.unpack(">II", png_bytes[16:24])
+    return bin_chunk[offset:offset + view["byteLength"]]
+
+
+def _glb_image_dims(path, image_index=0) -> tuple:
+    """(width, height) of the Nth embedded image in a .glb, read directly from its own IHDR
+    chunk."""
+    return struct.unpack(">II", _glb_image_png_bytes(path, image_index)[16:24])
+
+
+def _png_top_left_pixel(png_bytes: bytes) -> tuple:
+    """The raw (0-255) channel values of a PNG's own top-left pixel (x=0, y=0), decoded from its
+    compressed IDAT bytes. Does NOT need full per-scanline filter reconstruction (Sub/Up/
+    Average/Paeth): every PNG filter type's reconstruction formula for the very first pixel of
+    the first row uses only its left/up/upper-left neighbors, all of which are defined as 0 at
+    that corner (no pixel exists there) -- so Recon(0,0) == Filt(0,0) + predictor(0,0,0), and
+    every filter's own predictor of (0,0,0) is exactly 0, regardless of which filter type this
+    PNG actually used for that scanline. 8-bit depth, RGB/RGBA (color type 2/6) only -- what
+    this project's own PNG writers and Blender's own glTF exporter produce."""
+    bitdepth, colortype = struct.unpack(">BB", png_bytes[24:26])
+    channels = {2: 3, 6: 4}[colortype]
+    pos, idat = 8, b""
+    while pos < len(png_bytes):
+        length = struct.unpack(">I", png_bytes[pos:pos + 4])[0]
+        ctype = png_bytes[pos + 4:pos + 8]
+        if ctype == b"IDAT":
+            idat += png_bytes[pos + 8:pos + 8 + length]
+        pos += 8 + length + 4
+    raw = zlib.decompress(idat)
+    return tuple(raw[1:1 + channels])  # raw[0] is the scanline's own filter-type byte
 
 
 class TestUsdzValidate(unittest.TestCase):
@@ -1517,6 +1544,72 @@ class TestToolchain(unittest.TestCase):
         self.assertNotEqual(paths[0].casefold(), paths[1].casefold())
         for p in paths:
             self.assertTrue(Path(p).exists())
+
+    def test_optimize_flip_normal_map_green_inverts_only_the_green_channel_of_a_real_normal_map(self):
+        # normal_map_cube.blend: a cube with two textures -- "normal_tex" (R=0.8,G=0.9,B=0.6,
+        # deliberately asymmetric so a flip is unambiguous), genuinely wired through a Normal Map
+        # node into the material's Normal input, and "decoy_tex" (R=0.1,G=0.9,B=0.6) wired
+        # directly into Base Color -- NOT a normal map, to prove the flip only touches a real one.
+        # Verified against the actual embedded PNG bytes in both outputs (not just this tool's
+        # own JSON claim): unflipped normal_tex's top-left pixel is (204,230,153) -- exactly
+        # round(0.8*255), round(0.9*255), round(0.6*255). After the flip: R and B are bit-for-bit
+        # identical (204, 153); G drops to ~25 (round((1-0.9)*255)=26, off by one from float32
+        # precision in 1.0-0.9 -- a tolerance, not an exact match, accounts for that). decoy_tex
+        # is bit-for-bit identical in both outputs -- untouched, as required.
+        base = self.out / "nm_base.glb"
+        flipped = self.out / "nm_flipped.glb"
+        fixture = str(ROOT / "tests" / "fixtures" / "normal_map_cube.blend")
+        proc_base = run("optimize.py", fixture, "-o", str(base), "--json")
+        self.assertEqual(proc_base.returncode, 0, proc_base.stderr)
+        proc_flip = run("optimize.py", fixture, "-o", str(flipped), "--flip-normal-map-green", "--json")
+        self.assertEqual(proc_flip.returncode, 0, proc_flip.stderr)
+        data = json.loads(proc_flip.stdout)
+        self.assertEqual(data["normal_maps_flipped"], ["normal_tex"])
+
+        base_images = {}
+        flipped_images = {}
+        for path, dest in ((base, base_images), (flipped, flipped_images)):
+            with open(path, "rb") as f:
+                f.read(12)
+                json_len, _ = struct.unpack("<II", f.read(8))
+                gltf = json.loads(f.read(json_len))
+            for i, image in enumerate(gltf["images"]):
+                dest[image["name"]] = _png_top_left_pixel(_glb_image_png_bytes(path, i))
+
+        r0, g0, b0, a0 = base_images["normal_tex"]
+        r1, g1, b1, a1 = flipped_images["normal_tex"]
+        self.assertEqual((r0, b0, a0), (204, 153, 255))
+        self.assertEqual((r1, b1, a1), (204, 153, 255))  # R/B/A untouched by the flip
+        self.assertEqual(g0, 230)
+        self.assertAlmostEqual(g1, 25, delta=1)  # ~round((1-0.9)*255); float32 precision, not exact
+        self.assertEqual(base_images["decoy_tex"], flipped_images["decoy_tex"])  # decoy untouched
+
+    def test_optimize_flip_normal_map_green_is_empty_without_the_flag(self):
+        out = self.out / "nm_no_flag.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "normal_map_cube.blend"), "-o", str(out), "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["normal_maps_flipped"], [])
+
+    def test_optimize_flip_normal_map_green_prints_the_flipped_name_in_text_mode(self):
+        out = self.out / "nm_text.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "normal_map_cube.blend"), "-o", str(out), "--flip-normal-map-green")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("flipped the green channel on normal map(s): normal_tex", proc.stdout)
+
+    def test_optimize_flip_normal_map_green_finds_a_normal_map_on_a_non_first_bsdf_node(self):
+        # multi_bsdf_normal_map.blend: two real Principled BSDF nodes blended through a Mix
+        # Shader (a genuine, working Blender pattern, confirmed directly) -- the FIRST BSDF has
+        # no normal map at all, the SECOND has "second_bsdf_normal" wired through a real Normal
+        # Map node. A naive next(n for n in nodes if n.type == "BSDF_PRINCIPLED") search (the
+        # same single-BSDF pattern info.py's own _colorspace_issues/_find_alpha_image already
+        # use) would stop at the first, normal-map-less BSDF and silently miss this one entirely.
+        out = self.out / "multi_bsdf_out.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "multi_bsdf_normal_map.blend"),
+                   "-o", str(out), "--flip-normal-map-green", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["normal_maps_flipped"], ["second_bsdf_normal"])
 
     def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
         # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published

@@ -985,3 +985,38 @@ resolution, silently mismatched against the JSON summary's own (correctly-comput
 size. Fixed by always calling `copy.scale(w, h)` explicitly, even for level 0 -- never assume a
 freshly `.copy()`-ed image inherits any runtime state (including size) a prior `.scale()` call
 left on the source it was copied from.
+
+## Setting Image.colorspace_settings.name AFTER Image.pixels.foreach_set() silently discards the pixels
+
+Discovered while building a test fixture for `--flip-normal-map-green` (RM-044), not in any
+shipped skill code -- but worth documenting since the same mistake would break any future feature
+that generates a texture in-session. On a `bpy.data.images.new()` image, the order matters:
+
+```python
+img = bpy.data.images.new("tex", width=4, height=4, alpha=True)
+img.pixels.foreach_set([0.8, 0.9, 0.6, 1.0] * 16)
+img.colorspace_settings.name = "Non-Color"   # <- silently wipes the pixels just written
+img.pack()
+# img.pixels is now (0.0, 0.0, 0.0, 1.0) x16, not what foreach_set wrote
+```
+
+Confirmed directly on a real Blender 4.2.23: reading `img.pixels` immediately after this exact
+sequence -- before any save, export, or reload -- already shows an all-zero buffer, so this isn't
+an export-time or file-round-trip issue at all; the pixel data is gone the moment the colorspace
+tag changes. Swapping the order fixes it completely:
+
+```python
+img = bpy.data.images.new("tex", width=4, height=4, alpha=True)
+img.colorspace_settings.name = "Non-Color"   # set BEFORE writing pixels
+img.pixels.foreach_set([0.8, 0.9, 0.6, 1.0] * 16)
+img.pack()
+```
+
+This is narrower than it first looks: changing `colorspace_settings.name` on an *already-loaded*
+image (e.g. one this skill just imported from a real glTF/FBX file, via `_compat.import_file`)
+does **not** wipe its pixels -- confirmed directly, and consistent with `_fix_colorspace`/
+`_set_all_colorspace` (both already-shipped, both change colorspace on already-imported images)
+never having shown this symptom. The bug is specific to a brand-new `bpy.data.images.new()`
+image whose pixel buffer hasn't been "settled" (saved/packed/reloaded) yet -- exactly the
+situation a test-fixture-building script is in, and exactly why this was caught here rather than
+in any real asset pipeline run.

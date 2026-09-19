@@ -185,7 +185,19 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   this fixes it); `--texture-colorspace NAME` is the blunt override, forcing every texture to one
   named colorspace (e.g. `ACEScg`/`ACES2065-1` for an ACES-aware pipeline -- Blender's own
   bundled OCIO config has no ACES *view transform* for rendering at all, only these texture-
-  tagging colorspaces, confirmed via its real enum). `--remove-unused-bones` prunes every bone
+  tagging colorspaces, confirmed via its real enum). `--flip-normal-map-green` inverts the green
+  (Y) channel of every texture genuinely wired as a tangent-space normal map (an Image Texture
+  feeding a Normal Map node feeding a material's Normal input) -- the complete, sole pixel
+  operation to convert between OpenGL (+Y) and DirectX (-Y) normal map convention; R/X and B/Z
+  are shared between both conventions and left untouched. Deliberately does *not* attempt to
+  auto-detect which convention a normal map is currently in -- no reliable general-case,
+  pixel-data-only method for that exists (confirmed via research: even Adobe Substance 3D
+  Painter can't do it without an explicit tag, and Unity holds a patent, US12102923B2, for a
+  statistical reconstruction-error heuristic with no published reliability figures). glTF's own
+  spec mandates OpenGL convention for `normalTexture`; Unity and Godot also expect OpenGL; Unreal
+  expects DirectX -- each engine's own texture importer exposes only a manual "flip green
+  channel" toggle, never auto-detection, which is exactly what this mirrors: a deliberate
+  conversion you run when you know the source and target disagree. `--remove-unused-bones` prunes every bone
   with zero skin-weight influence and no animation, from the leaves inward (never a bone a
   still-used descendant needs); `--max-bones N` caps an armature at N bones -- a real
   mobile-engine-style bone budget, not just a report -- removing the lowest-influence unanimated
