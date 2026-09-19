@@ -1597,6 +1597,20 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("flipped the green channel on normal map(s): normal_tex", proc.stdout)
 
+    def test_optimize_flip_normal_map_green_finds_a_normal_map_on_a_non_first_bsdf_node(self):
+        # multi_bsdf_normal_map.blend: two real Principled BSDF nodes blended through a Mix
+        # Shader (a genuine, working Blender pattern, confirmed directly) -- the FIRST BSDF has
+        # no normal map at all, the SECOND has "second_bsdf_normal" wired through a real Normal
+        # Map node. A naive next(n for n in nodes if n.type == "BSDF_PRINCIPLED") search (the
+        # same single-BSDF pattern info.py's own _colorspace_issues/_find_alpha_image already
+        # use) would stop at the first, normal-map-less BSDF and silently miss this one entirely.
+        out = self.out / "multi_bsdf_out.glb"
+        proc = run("optimize.py", str(ROOT / "tests" / "fixtures" / "multi_bsdf_normal_map.blend"),
+                   "-o", str(out), "--flip-normal-map-green", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["normal_maps_flipped"], ["second_bsdf_normal"])
+
     def test_optimize_target_roblox_clamps_to_the_real_20000_triangle_budget(self):
         # highpoly_sphere.blend: a 20,480-triangle icosphere, just over Roblox's own published
         # "individual meshes cannot exceed 20,000 triangles" (create.roblox.com/docs/art/

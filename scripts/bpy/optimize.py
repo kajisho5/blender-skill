@@ -488,20 +488,29 @@ def _fix_colorspace(materials) -> int:
 def _normal_map_images(materials) -> dict:
     """image name -> bpy.types.Image, for every texture genuinely wired as a tangent-space
     normal map (an Image Texture feeding a Normal Map node feeding a Principled BSDF's Normal
-    input) across the given materials -- reuses info.py's own _normal_map_image, the same
-    detection info.py's colorspace check already relies on, so this never drifts from what
-    info.py itself would call a normal map. A dict, not a list: the same image can be shared by
-    multiple materials, and a flip must happen once per image, not once per material using it."""
+    input) across the given materials -- reuses info.py's own _normal_map_image (which takes one
+    already-found BSDF node and checks its Normal input) for the actual detection, so this never
+    drifts from what info.py itself would call a normal map. A dict, not a list: the same image
+    can be shared by multiple materials, and a flip must happen once per image, not once per
+    material using it.
+
+    Checks every BSDF_PRINCIPLED node in a material's node tree, not just one -- a material can
+    legitimately have more than one (e.g. two Principled BSDFs blended through a Mix Shader, a
+    real, working Blender pattern, confirmed directly). An earlier version used
+    next((n for n in ... if n.type == "BSDF_PRINCIPLED"), None) -- the same single-BSDF search
+    info.py's own _colorspace_issues/_find_alpha_image already use -- which silently missed a
+    normal map wired into any BSDF other than the first one found. Caught by review.
+    """
     images = {}
     for mat in materials:
         if not mat.use_nodes or not mat.node_tree:
             continue
-        bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
-        if not bsdf:
-            continue
-        img = info_mod._normal_map_image(bsdf)
-        if img:
-            images[img.name] = img
+        for node in mat.node_tree.nodes:
+            if node.type != "BSDF_PRINCIPLED":
+                continue
+            img = info_mod._normal_map_image(node)
+            if img:
+                images[img.name] = img
     return images
 
 
