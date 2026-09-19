@@ -55,7 +55,7 @@ what v0.1.0 actually does.
 | RM-042 | optimize | 頂点順序/キャッシュ最適化のレポート | done | #35 |
 | RM-043 | optimize | ミップマップ用テクスチャ事前生成 | done | |
 | RM-044 | optimize | 法線マップのGreenチャンネル反転によるOpenGL/DirectX変換 | done | |
-| RM-045 | optimize | 予算超過時の自動段階最適化（目標内に収まるまで） | planned | #38 |
+| RM-045 | optimize | 予算超過時の自動段階最適化（目標内に収まるまで） | done | |
 | RM-046 | render | HDRIプリセット（同梱の小さいCC0 HDRI 2〜3枚） | planned | #39 |
 | RM-047 | render | 360°ターンテーブルの回転方向・角度・ループ長指定 | planned | #40 |
 | RM-048 | render | 製品撮影プリセット（白背景・影あり・パッケージ用） | planned | #41 |

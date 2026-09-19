@@ -151,10 +151,20 @@ def _tri_overlap_2d(t1, t2) -> bool:
     return _point_in_tri(t1[0], t2) or _point_in_tri(t2[0], t1)
 
 
-def _uv_checks(bm):
+def _uv_checks(bm, skip_overlap=False):
     """UV out-of-[0,1]-range, zero-area (never meaningfully unwrapped), and overlapping faces,
     on the *active* UV layer of an already-triangulated bmesh. Returns None if there's no UV
     layer (nothing to check).
+
+    skip_overlap skips only the overlap scan below -- confirmed the real, severe cost here: its
+    nested candidate-pair loop is a plain O(n^2) Python double loop with no spatial partitioning
+    at all (unlike _self_intersecting_faces's own BVHTree-based bbox prefilter, confirmed fast --
+    0.2s on 105,600 triangles). Confirmed directly: this scan alone did not finish within 20s on
+    a real 105,600-triangle UV-mapped mesh, while out_of_bounds/zero_area (a single O(n) pass,
+    left un-skippable since it's cheap regardless) stayed instant. check.py/fit.py never read
+    overlapping_faces_approx at all (see references/pitfalls.md), so both pass this True to avoid
+    ever calling info.py on a real, large, sketchfab/3d-print-budget-sized asset (500k/2M
+    triangles) and having it effectively hang.
 
     - out_of_bounds is informational, not a defect: a texture using UV wrap/repeat tiling
       legitimately places UVs outside [0,1] (confirmed: scaling a normal unwrap by 3x for tiling
@@ -202,27 +212,30 @@ def _uv_checks(bm):
         degenerate = area < 1e-8
         if degenerate:
             zero_area += 1
-        xs, ys = [u[0] for u in uvs], [u[1] for u in uvs]
-        bbox = (min(xs), min(ys), max(xs), max(ys))
-        positions = {(round(x, 5), round(y, 5)) for x, y in uvs}
-        candidates.append((bbox, positions, uvs, degenerate))
+        if not skip_overlap:
+            xs, ys = [u[0] for u in uvs], [u[1] for u in uvs]
+            bbox = (min(xs), min(ys), max(xs), max(ys))
+            positions = {(round(x, 5), round(y, 5)) for x, y in uvs}
+            candidates.append((bbox, positions, uvs, degenerate))
 
-    overlapping = 0
-    n = len(candidates)
-    for i in range(n):
-        bi, pi, ti, di = candidates[i]
-        if di:
-            continue
-        for j in range(i + 1, n):
-            bj, pj, tj, dj = candidates[j]
-            if dj:
+    overlapping = None
+    if not skip_overlap:
+        overlapping = 0
+        n = len(candidates)
+        for i in range(n):
+            bi, pi, ti, di = candidates[i]
+            if di:
                 continue
-            if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
-                continue
-            if 0 < len(pi & pj) < 3:
-                continue
-            if _tri_overlap_2d(ti, tj):
-                overlapping += 1
+            for j in range(i + 1, n):
+                bj, pj, tj, dj = candidates[j]
+                if dj:
+                    continue
+                if bi[2] < bj[0] or bj[2] < bi[0] or bi[3] < bj[1] or bj[3] < bi[1]:
+                    continue
+                if 0 < len(pi & pj) < 3:
+                    continue
+                if _tri_overlap_2d(ti, tj):
+                    overlapping += 1
 
     return {
         "out_of_bounds_faces": out_of_bounds,
@@ -298,7 +311,7 @@ def _wall_thickness_min(bm, sample_limit=2000):
     return min_thickness
 
 
-def _mesh_stats(obj):
+def _mesh_stats(obj, skip_uv_overlap_check=False):
     """Triangle/vertex counts and UV layer count as-imported (never modifies the mesh -- info.py
     only reads), plus two checks computed on a *welded* scratch copy:
 
@@ -333,7 +346,7 @@ def _mesh_stats(obj):
     # Only trust the flipped-normal comparison on an already-manifold mesh -- see
     # _flipped_normal_faces' docstring for the real (not hypothetical) corruption this avoids.
     flipped_normals = _flipped_normal_faces(bm) if non_manifold == 0 else None
-    uv_checks = _uv_checks(bm)
+    uv_checks = _uv_checks(bm, skip_overlap=skip_uv_overlap_check)
     bm.normal_update()
     wall_thickness_min = _wall_thickness_min(bm)
     bm_welded.free()
@@ -715,8 +728,9 @@ def run(args):
     mesh_objs = [o for o in objects if o.type == "MESH"]
     per_object = []
     total_tris = total_verts = 0
+    skip_uv_overlap_check = bool(args.get("skip_uv_overlap_check"))
     for o in mesh_objs:
-        stats = _mesh_stats(o)
+        stats = _mesh_stats(o, skip_uv_overlap_check=skip_uv_overlap_check)
         stats["name"] = o.name
         per_object.append(stats)
         total_tris += stats["triangles"]

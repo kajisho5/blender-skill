@@ -61,6 +61,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("file")
     ap.add_argument("--compact", action="store_true", help="a short JSON summary instead of the full report (implies --json)")
+    ap.add_argument("--skip-uv-overlap-check", action="store_true", help="skip the UV-overlap scan (overlapping_faces_approx reports null instead of a count). That scan's own candidate-pair loop is an uncapped O(n^2) Python double loop -- confirmed it did not finish within 20s on a real 105,600-triangle UV-mapped mesh, while every other check here stayed near-instant on the same file. out_of_bounds_faces/zero_area_faces are unaffected (a cheap single pass, always computed). check.py/fit.py already pass this internally, since neither reads overlapping_faces_approx at all -- use it directly on a large real asset (a Sketchfab/3D-print-budget-sized mesh, 500k+ triangles) if a plain info.py run is taking too long.")
     _common.add_common_args(ap, dry_run=False, fast=False, progress=False)
     args = ap.parse_args()
     as_json = args.json or args.compact
@@ -74,7 +75,8 @@ def main() -> int:
                 kind="input", hint=f"known extensions: {', '.join(_formats.known_extensions())}",
             )
         blender_bin = _run.find_blender(args.blender)
-        result = _run.run_bpy("info.py", {"path": str(path.resolve()), "format": fmt},
+        result = _run.run_bpy("info.py", {"path": str(path.resolve()), "format": fmt,
+                                           "skip_uv_overlap_check": args.skip_uv_overlap_check},
                                blender_bin=blender_bin, timeout=args.timeout)
     except SkillError as err:
         return _common.fail(err, as_json)

@@ -24,7 +24,7 @@ HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
 PROTOCOL_VERSION = "2024-11-05"
 
-TOOLS = ["info", "convert", "split", "anim", "lod", "optimize", "render", "look", "check", "bake", "scene", "batch", "verify"]
+TOOLS = ["info", "convert", "split", "anim", "lod", "optimize", "render", "look", "check", "fit", "bake", "scene", "batch", "verify"]
 
 _DESCRIPTIONS = {
     "info": "Inspect a 3D file: object/mesh/material/texture/animation counts, unit scale, bounding box, non-manifold/duplicate-vertex checks, UV presence.",
@@ -36,6 +36,7 @@ _DESCRIPTIONS = {
     "render": "Render a thumbnail, turntable animation, or 4-view sheet.",
     "look": "UV layout, wireframe render, texture grid, or before/after comparison image.",
     "check": "PASS/WARN/FAIL a file against a delivery target's budget (three.js, Unity, Unreal, Godot, iOS/Android AR, WebXR, 3D printing, Sketchfab).",
+    "fit": "Automatically re-optimize in escalating stages until a file fits a check.py target's own budget, or report honestly that it still doesn't.",
     "bake": "Bake a material to a texture (AO/normal/roughness/diffuse/combined), optionally atlasing several objects.",
     "scene": "Assemble a declarative scene.json (asset placement, lights, camera, background) into a render and/or exported file.",
     "batch": "Run a recipe (a chain of this skill's scripts) over every 3D file in a folder, with content-hash caching.",

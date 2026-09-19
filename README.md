@@ -69,7 +69,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   object's own bounding-box center/bottom-center (data, not a defect -- an off-center origin is
   often deliberate), UV out-of-[0,1]-range/zero-area/overlap detection (out-of-bounds and overlap
   are data, not defects -- tiling textures and mirrored UV islands both use them deliberately;
-  zero-area is a real "never actually unwrapped" defect), vertex color layers and other genuinely
+  zero-area is a real "never actually unwrapped" defect; `--skip-uv-overlap-check` skips only the
+  overlap scan's own uncapped O(n^2) candidate-pair loop -- confirmed it did not finish within 20s
+  on a real 105,600-triangle UV-mapped mesh, while everything else here stayed near-instant on the
+  same file; `check.py`/`fit.py` already pass this internally, since neither reads the overlap
+  count at all), vertex color layers and other genuinely
   custom mesh attributes (Blender's own non-internal built-ins -- `position`, `material_index`,
   bevel weight, crease -- are excluded), per-animation-clip bone count and root-motion detection
   (whether the armature's own root bone's `location` channel actually moves, vs. an in-place
@@ -260,6 +264,17 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   `.usdz` inputs, also validates the package itself against Apple's real USDZ requirements (every
   entry uncompressed and 64-byte-aligned -- read from the file's own zip structure, independent
   of Blender).
+- **`fit.py`** -- automatically re-optimizes in escalating stages until a file fits one of
+  `check.py`'s own real targets, or reports honestly that it still doesn't after a bounded number
+  of attempts; only loops on the three budget rows this skill has a real lever for (triangle
+  count, texture size, transmission size -- everything else, `check.py`'s own fix text already
+  says isn't automated by this skill). Triangle/texture budgets get an exact, one-shot fix at
+  stage 0 (decimate ratio is precise -- confirmed directly against real Blender, never guessed
+  iteratively); transmission size is the one genuinely unpredictable dimension (compression ratio
+  can't be computed in advance, only measured), so it's the one that actually escalates across
+  stages. Reads the result straight from `optimize.py`'s own report and the output file's real
+  bytes on disk -- never by re-importing a `--meshopt`/`--ktx2`-compressed stage through Blender,
+  which can't read that format back at all (see `references/pitfalls.md`).
 - **`bake.py`** -- Cycles-bake a material to a texture (AO/normal/roughness/diffuse/combined);
   `--atlas` repacks UVs across several objects into one shared image first.
 - **`scene.py`** -- assemble a declarative `scene.json` (asset placement, lights, camera,
@@ -293,6 +308,7 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 | `render.py` | Thumbnail, turntable, 4-view sheet |
 | `look.py` | Wireframe, texture grid, before/after compare, UV layout |
 | `check.py` | Delivery-target PASS/WARN/FAIL with fix commands |
+| `fit.py` | Automatically re-optimize in escalating stages until it fits a check.py target's real budget |
 | `bake.py` | Material-to-texture baking, with UV-atlas repacking |
 | `scene.py` | Declarative multi-asset scene assembly |
 | `batch.py` | Recipe chains over a folder, with a content-hash cache |

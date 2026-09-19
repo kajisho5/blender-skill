@@ -97,6 +97,18 @@ re-opened by any other script in this skill -- that's an inherent limitation of 
 importer, not a bug in the meshopt step itself. Draco-compressed output does not have this
 problem (Blender's importer supports `KHR_draco_mesh_compression` natively).
 
+`fit.py` (RM-045) hit this exact error directly during development: its first version
+re-verified each stage's own result by re-importing it through `info.py` (needed for `check.py`'s
+own budget rows), which of course fails the instant a stage applies `--meshopt` for the
+transmission-size budget -- the same error text as above. Fixed by never re-importing a stage's
+output at all: triangle/texture-size compliance is read straight from `optimize.py`'s own
+reported `triangles_after` (decimate ratio and `--texture-max` are both exact, confirmed
+elsewhere in this codebase, so there is nothing to re-verify), and transmission size from the
+output file's own real bytes on disk (`Path.stat().st_size`, format-agnostic). A lesson already
+written down right here would have avoided the mistake in the first place -- re-read this file
+before assuming a "measure the result" step is safe to build the same way every other script's
+own already-imported-file checks are.
+
 ## Draco compression changes the reported vertex count
 
 `gltf-transform draco` re-indexes geometry as part of encoding; a cube-like mesh that reads as
@@ -1020,3 +1032,25 @@ never having shown this symptom. The bug is specific to a brand-new `bpy.data.im
 image whose pixel buffer hasn't been "settled" (saved/packed/reloaded) yet -- exactly the
 situation a test-fixture-building script is in, and exactly why this was caught here rather than
 in any real asset pipeline run.
+
+## info.py's UV-overlap scan is an uncapped O(n^2) loop -- effectively hangs on a large real mesh
+
+Discovered building RM-045 (`fit.py`), which needs `info.py` to work on real assets sized for
+`check.py`'s own larger targets (sketchfab: 500,000 triangles; 3d-print: 2,000,000). `_uv_checks`'
+overlap-candidate loop (`for i in range(n): for j in range(i+1, n): ...`) has no spatial
+partitioning at all -- unlike `_self_intersecting_faces`, which does the equivalent 3D check via
+a `BVHTree.overlap()` query and stays fast (confirmed: 0.2s on 105,600 triangles). Confirmed
+directly: a real, UV-mapped, 105,600-triangle flat grid fixture made `_uv_checks` alone fail to
+finish within 20s; a naive first attempt at a 100k+-triangle fixture (a UV sphere) made a full
+`info.py` run run for 9+ minutes before being killed by hand.
+
+Fixed with `--skip-uv-overlap-check` (`info.py`), threaded through as `skip_uv_overlap_check` in
+the bpy-side args: skips only the expensive nested loop itself (`overlapping_faces_approx` reads
+`null`/`None` instead of a count), leaving `out_of_bounds_faces`/`zero_area_faces` (a cheap,
+always-computed single O(n) pass) untouched. `check.py` and `fit.py` both now pass this
+internally and unconditionally -- neither ever reads `overlapping_faces_approx` in the first
+place, so the expensive scan was pure wasted work for both, already shipped, on any real large
+asset, before this fix. A genuinely proper fix (giving the overlap scan the same BVH-based
+spatial partitioning the 3D self-intersection check already uses) is real, separate, follow-up-
+issue-sized work -- out of scope here, since the immediate, narrower goal (make `check.py`/
+`fit.py` practical on a large real asset) doesn't need the full diagnostic at all.
