@@ -316,6 +316,18 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(uv["overlapping_faces_approx"], 12)
         self.assertTrue(any("overlapping UVs" in w for w in data["warnings"]))
 
+    def test_info_skip_uv_overlap_check_returns_null_instead_of_the_real_count(self):
+        # Same overlapping_uv_cubes.glb as the test above (12 real overlapping faces), but with
+        # --skip-uv-overlap-check: overlapping_faces_approx must read null/None (not computed,
+        # never a wrong "0"), while zero_area_faces stays a real, always-computed number (that
+        # scan is a cheap O(n) single pass, never skipped) -- confirms the flag skips only the
+        # genuinely expensive O(n^2) overlap scan itself, not the whole uv_checks block.
+        proc = run("info.py", str(OVERLAPPING_UV_FIXTURE), "--skip-uv-overlap-check", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        uv = json.loads(proc.stdout)["meshes"]["per_object"][0]["uv_checks"]
+        self.assertIsNone(uv["overlapping_faces_approx"])
+        self.assertEqual(uv["zero_area_faces"], 0)
+
     def test_info_uv_checks_have_no_false_positives_on_a_real_character_mesh(self):
         # fox.glb: a real, cleanly-laid-out UV map. A naive bounding-box-only overlap filter
         # falsely flagged 273/576 faces here during development (see references/pitfalls.md) --
@@ -1837,6 +1849,88 @@ class TestToolchain(unittest.TestCase):
         results = json.loads(proc.stdout)
         self.assertTrue(all(r["ok"] for r in results))
         self.assertTrue((out_dir / "box_convert.obj").exists())
+
+    def test_fit_brings_an_over_triangle_budget_file_within_a_real_targets_budget(self):
+        # over_triangle_budget_grid.blend: a flat, 105,600-triangle grid -- deliberately just
+        # over ios-ar/android-ar's real 100,000-triangle budget (check.py's own _SPEC, the
+        # smallest triangle budget among every real target this skill knows). Decimate ratio is
+        # precise (confirmed elsewhere in this codebase), so this should converge in exactly 1
+        # stage, not need real escalation -- verified against the *actual* exported glb's own
+        # index-accessor count, not just this tool's own reported JSON.
+        out = self.out / "fit_grid.glb"
+        proc = run("fit.py", str(ROOT / "tests" / "fixtures" / "over_triangle_budget_grid.blend"),
+                   "-o", str(out), "--target", "ios-ar", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertTrue(data["met_budget"])
+        self.assertEqual(data["stages_used"], 1)
+        tri_row = next(r for r in data["checks"] if r["check"] == "triangle budget")
+        self.assertEqual(tri_row["status"], "PASS")
+
+        with open(out, "rb") as f:
+            f.read(12)
+            json_len, _ = struct.unpack("<II", f.read(8))
+            gltf = json.loads(f.read(json_len))
+        accessor = gltf["accessors"][gltf["meshes"][0]["primitives"][0]["indices"]]
+        self.assertLessEqual(accessor["count"] // 3, 100_000)
+
+    def test_fit_is_a_noop_stage_when_already_within_budget(self):
+        # box.glb (12 triangles) against sketchfab (500,000-triangle budget, no size budget that
+        # would ever require compression for a file this small) -- no decimation should even be
+        # attempted (decimate_ratio stays None in stage 0's own record), and it should pass on
+        # the very first stage.
+        out = self.out / "fit_noop.glb"
+        proc = run("fit.py", str(FIXTURE), "-o", str(out), "--target", "sketchfab", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertTrue(data["met_budget"])
+        self.assertEqual(data["stages_used"], 1)
+        self.assertIsNone(data["history"][0]["decimate_ratio"])
+
+    def test_fit_rejects_a_max_stages_below_one(self):
+        out = self.out / "fit_bad.glb"
+        proc = run("fit.py", str(FIXTURE), "-o", str(out), "--target", "sketchfab", "--max-stages", "0")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_fit_prints_the_verdict_in_text_mode(self):
+        out = self.out / "fit_text.glb"
+        proc = run("fit.py", str(FIXTURE), "-o", str(out), "--target", "sketchfab")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("fits the sketchfab budget after 1 stage(s)", proc.stdout)
+
+
+class TestFitInternals(unittest.TestCase):
+    """Pure-Python logic in fit.py that doesn't need Blender at all -- covers the escalation and
+    honest-failure paths a real end-to-end run can't easily force (decimate ratio's own real
+    precision, confirmed directly against Blender elsewhere in this suite, makes a genuine
+    multi-stage or still-failing real scenario impractical to construct reliably)."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import fit
+        self.fit = fit
+
+    def test_next_stage_params_only_tightens_the_lever_for_a_still_failing_row(self):
+        # Triangle budget still WARN -> decimate ratio tightens; transmission size already PASS
+        # -> texture_max must be left untouched (never re-degrade a dimension that already
+        # passed).
+        texture_max, decimate_ratio = self.fit._next_stage_params(
+            {"triangle budget": "WARN", "transmission size": "PASS"}, texture_max=2048, decimate_ratio=0.9)
+        self.assertAlmostEqual(decimate_ratio, 0.63)
+        self.assertEqual(texture_max, 2048)
+
+    def test_next_stage_params_halves_texture_max_for_a_still_failing_transmission_size(self):
+        texture_max, decimate_ratio = self.fit._next_stage_params(
+            {"transmission size": "WARN"}, texture_max=2048, decimate_ratio=None)
+        self.assertEqual(texture_max, 1024)
+        self.assertIsNone(decimate_ratio)
+
+    def test_stage_rows_reports_met_budget_false_when_still_over_after_the_real_lever_was_applied(self):
+        # The property that matters most: this tool must never silently report success when a
+        # dimension it measured is still genuinely over budget.
+        rows = self.fit._stage_rows(tris_after=150_000, tri_budget=100_000, size_mb_budget=None, stage_out=str(FIXTURE))
+        self.assertEqual(rows[0]["status"], "WARN")
+        self.assertIn("150000 > 100000", rows[0]["detail"])
 
 
 if __name__ == "__main__":

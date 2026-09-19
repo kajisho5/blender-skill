@@ -152,7 +152,10 @@ def main() -> int:
         if fmt is None:
             raise SkillError(f"unrecognized file extension: {path.suffix}", kind="input")
         blender_bin = _run.find_blender(args.blender)
-        result = _run.run_bpy("info.py", {"path": str(path.resolve()), "format": fmt},
+        # _check() below never reads overlapping_faces_approx -- always skip that scan's own
+        # uncapped O(n^2) cost (see info.py's own --skip-uv-overlap-check help) rather than
+        # paying for data this tool's own output never uses.
+        result = _run.run_bpy("info.py", {"path": str(path.resolve()), "format": fmt, "skip_uv_overlap_check": True},
                                blender_bin=blender_bin, timeout=args.timeout)
     except SkillError as err:
         return _common.fail(err, args.json)
