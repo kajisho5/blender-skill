@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.30.0...blender-skill-v0.31.0) (2026-09-19)
+
+
+### Features
+
+* **optimize:** RM-044 normal map OpenGL/DirectX green-channel flip ([#161](https://github.com/kajisho5/blender-skill/issues/161)) ([b5aed85](https://github.com/kajisho5/blender-skill/commit/b5aed8572090d654d9673e421b55e2cdd234e17e))
+
 ## [0.30.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.29.0...blender-skill-v0.30.0) (2026-09-18)
 
 
