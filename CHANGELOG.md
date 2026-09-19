@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.29.0...blender-skill-v0.30.0) (2026-09-18)
+
+
+### Features
+
+* **optimize:** RM-043 mipmap-ready texture pre-generation ([#159](https://github.com/kajisho5/blender-skill/issues/159)) ([1c7f0a6](https://github.com/kajisho5/blender-skill/commit/1c7f0a685344809a593745b24ae59ae27015f4f5))
+
 ## [0.29.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.28.0...blender-skill-v0.29.0) (2026-09-18)
 
 
