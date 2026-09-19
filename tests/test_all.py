@@ -8,7 +8,10 @@ contributor without Blender installed still gets a clear signal instead of a wal
 Usage:
   python3 tests/test_all.py
 """
+import contextlib
+import io
 import json
+import shutil
 import struct
 import subprocess
 import sys
@@ -1898,6 +1901,19 @@ class TestToolchain(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("fits the sketchfab budget after 1 stage(s)", proc.stdout)
 
+    def test_fit_rejects_an_output_path_equal_to_the_input_path(self):
+        # The final (or only, on early convergence) stage's own shutil.move would otherwise
+        # silently overwrite the original input file with a lossy result -- even on a "still
+        # exceeds" run -- breaking the tool's own "always builds fresh from the original input"
+        # guarantee. Copy the fixture so a bug here can't clobber the real one.
+        same_path = self.out / "fit_inplace.glb"
+        shutil.copy(FIXTURE, same_path)
+        proc = run("fit.py", str(same_path), "-o", str(same_path), "--target", "sketchfab", "--json")
+        self.assertNotEqual(proc.returncode, 0)
+        data = json.loads(proc.stdout)
+        self.assertEqual(data["error"]["kind"], "input")
+        self.assertEqual(same_path.read_bytes(), FIXTURE.read_bytes())
+
 
 class TestFitInternals(unittest.TestCase):
     """Pure-Python logic in fit.py that doesn't need Blender at all -- covers the escalation and
@@ -1931,6 +1947,40 @@ class TestFitInternals(unittest.TestCase):
         rows = self.fit._stage_rows(tris_after=150_000, tri_budget=100_000, size_mb_budget=None, stage_out=str(FIXTURE))
         self.assertEqual(rows[0]["status"], "WARN")
         self.assertIn("150000 > 100000", rows[0]["detail"])
+
+    def test_next_stage_params_has_no_artificial_floor_below_which_a_ratio_cannot_be_tightened(self):
+        # optimize.py's own preset-driven ratio computation (scripts/bpy/optimize.py, triangle_budget
+        # / post_topology_tris) never clamps to a minimum -- a fixed 0.01 floor here would silently
+        # leave a large-enough input (e.g. an aggregate mesh needing ratio < 0.01 to reach a
+        # real target's budget) unfixable no matter how many stages run.
+        _texture_max, decimate_ratio = self.fit._next_stage_params(
+            {"triangle budget": "WARN"}, texture_max=None, decimate_ratio=0.005)
+        self.assertAlmostEqual(decimate_ratio, 0.0035)
+
+    def test_main_converts_a_stage_subprocess_timeout_into_a_structured_json_error(self):
+        # optimize.py's own subprocess.run() call in the stage loop must be caught the same way
+        # _run.py/_delegate.py already catch a Blender subprocess timing out elsewhere in this
+        # codebase (SkillError(kind="timeout")), not left to crash with a raw traceback that
+        # breaks the --json error contract. Mocks both Blender-launching calls (run_bpy and the
+        # optimize.py subprocess itself) so this exercises only the new try/except, not Blender.
+        from unittest import mock
+
+        fake_info = {"ok": True, "data": {"meshes": {"triangles": 12}}}
+        # Never actually opened -- subprocess.run is mocked to raise before optimize.py's own
+        # output path is ever touched.
+        out = Path(tempfile.gettempdir()) / "fit_timeout_never_written.glb"
+        argv = ["fit.py", str(FIXTURE), "-o", str(out), "--target", "sketchfab", "--json", "--timeout", "5"]
+        buf = io.StringIO()
+        with mock.patch.object(self.fit._run, "find_blender", return_value="blender"), \
+             mock.patch.object(self.fit._run, "run_bpy", return_value=fake_info), \
+             mock.patch.object(self.fit.subprocess, "run",
+                                side_effect=subprocess.TimeoutExpired(cmd="optimize.py", timeout=5)), \
+             mock.patch.object(sys, "argv", argv), \
+             contextlib.redirect_stdout(buf):
+            exit_code = self.fit.main()
+        self.assertEqual(exit_code, 3)  # _common.fail's own kind="timeout" -> exit 3
+        data = json.loads(buf.getvalue())
+        self.assertEqual(data["error"]["kind"], "timeout")
 
 
 if __name__ == "__main__":

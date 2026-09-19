@@ -212,10 +212,11 @@ def _uv_checks(bm, skip_overlap=False):
         degenerate = area < 1e-8
         if degenerate:
             zero_area += 1
-        xs, ys = [u[0] for u in uvs], [u[1] for u in uvs]
-        bbox = (min(xs), min(ys), max(xs), max(ys))
-        positions = {(round(x, 5), round(y, 5)) for x, y in uvs}
-        candidates.append((bbox, positions, uvs, degenerate))
+        if not skip_overlap:
+            xs, ys = [u[0] for u in uvs], [u[1] for u in uvs]
+            bbox = (min(xs), min(ys), max(xs), max(ys))
+            positions = {(round(x, 5), round(y, 5)) for x, y in uvs}
+            candidates.append((bbox, positions, uvs, degenerate))
 
     overlapping = None
     if not skip_overlap:

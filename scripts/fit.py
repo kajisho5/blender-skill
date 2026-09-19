@@ -57,7 +57,7 @@ def _next_stage_params(row_status: dict, texture_max, decimate_ratio):
     failing row's own dimension maps to -- never touching a lever whose own dimension already
     passed, so a stage never re-degrades something that's already fine."""
     if row_status.get("triangle budget") == "WARN":
-        decimate_ratio = max(0.01, (decimate_ratio or 1.0) * 0.7)
+        decimate_ratio = (decimate_ratio or 1.0) * 0.7
     if row_status.get("transmission size") == "WARN":
         texture_max = max(64, (texture_max or 4096) // 2)
     return texture_max, decimate_ratio
@@ -116,6 +116,8 @@ def main() -> int:
         blender_bin = _run.find_blender(args.blender)
         out_path = Path(args.out).resolve()
         in_resolved = str(in_path.resolve())
+        if out_path == in_path.resolve():
+            raise SkillError("--out must differ from the input file", kind="input")
 
         # A single upfront, cheap measurement (skip_uv_overlap_check -- see info.py's own
         # help/references/pitfalls.md for why: an uncapped O(n^2) scan this tool never reads
@@ -127,7 +129,7 @@ def main() -> int:
             raise SkillError(info_result["error"]["message"], kind=info_result["error"].get("kind", "internal"))
         tris = info_result["data"]["meshes"]["triangles"]
 
-        decimate_ratio = max(0.01, tri_budget / tris) if (tri_budget and tris > tri_budget) else None
+        decimate_ratio = tri_budget / tris if (tri_budget and tris > tri_budget) else None
         texture_max = tex_budget
 
         stages = []
@@ -136,7 +138,10 @@ def main() -> int:
                 out_path.with_name(f"{out_path.stem}_fitstage{stage_index}{out_path.suffix}"))
             argv = _optimize_argv(in_resolved, stage_out, texture_max, decimate_ratio,
                                    try_compress=bool(size_mb_budget), out_fmt=out_fmt)
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=args.timeout)
+            try:
+                proc = subprocess.run(argv, capture_output=True, text=True, timeout=args.timeout)
+            except subprocess.TimeoutExpired as exc:
+                raise SkillError(f"optimize.py did not finish within {args.timeout:.0f}s at stage {stage_index}", kind="timeout") from exc
             if proc.returncode != 0:
                 raise SkillError(f"optimize.py failed at stage {stage_index}: {(proc.stderr or proc.stdout).strip()[-500:]}", kind="internal")
             stage_result = json.loads(proc.stdout)
