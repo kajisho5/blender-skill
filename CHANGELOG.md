@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.31.0...blender-skill-v0.32.0) (2026-09-19)
+
+
+### Features
+
+* **optimize:** RM-045 automatic staged optimization until within budget ([#166](https://github.com/kajisho5/blender-skill/issues/166)) ([39547d9](https://github.com/kajisho5/blender-skill/commit/39547d9e118451891c3ff68e087e20c5bde1599c))
+
 ## [0.31.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.30.0...blender-skill-v0.31.0) (2026-09-19)
 
 
