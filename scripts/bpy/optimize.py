@@ -19,6 +19,7 @@ import _compat
 import bmesh
 import bpy
 import mathutils
+import numpy as np
 import info as info_mod
 
 # Opinionated defaults, not a spec any external authority publishes -- texture caps and decimate
@@ -482,6 +483,59 @@ def _fix_colorspace(materials) -> int:
             image.colorspace_settings.name = issue["expected"]
             fixed += 1
     return fixed
+
+
+def _normal_map_images(materials) -> dict:
+    """image name -> bpy.types.Image, for every texture genuinely wired as a tangent-space
+    normal map (an Image Texture feeding a Normal Map node feeding a Principled BSDF's Normal
+    input) across the given materials -- reuses info.py's own _normal_map_image, the same
+    detection info.py's colorspace check already relies on, so this never drifts from what
+    info.py itself would call a normal map. A dict, not a list: the same image can be shared by
+    multiple materials, and a flip must happen once per image, not once per material using it."""
+    images = {}
+    for mat in materials:
+        if not mat.use_nodes or not mat.node_tree:
+            continue
+        bsdf = next((n for n in mat.node_tree.nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not bsdf:
+            continue
+        img = info_mod._normal_map_image(bsdf)
+        if img:
+            images[img.name] = img
+    return images
+
+
+def _flip_normal_map_green(materials) -> list:
+    """Inverts the green (Y) channel of every texture genuinely wired as a tangent-space normal
+    map (see _normal_map_images) -- the complete, sole pixel operation needed to convert between
+    OpenGL (+Y) and DirectX (-Y) normal map convention: only the Y basis vector's sign differs
+    between the two; R (X) and B (Z) are shared and untouched. Confirmed via research against
+    production-tool/engine documentation: Fourth Woods Blog, the Mari Extension Pack's own
+    "Normal OpenGL|DirectX" node docs, and Unreal Engine's own material-editor pattern
+    (normal.g = 1.0 - normal.g) all describe this exact, sole operation -- no source describes
+    needing to also touch R/B or renormalize afterward.
+
+    Deliberately does NOT attempt to auto-detect which convention a normal map is *currently*
+    in -- no reliable general-case, pixel-data-only method for that exists. Confirmed: Adobe's
+    own Substance 3D Painter explicitly cannot do it either ("Substance 3D Painter can't guess
+    by itself whether a map is DirectX or OpenGL, except if the map is tagged" -- Adobe
+    Community), and Unity holds a patent (US12102923B2) for a statistical reconstruction-error
+    heuristic for this exact problem, with no published reliability figures -- strong evidence
+    this isn't a solved, deterministic problem a numpy pixel check could honestly claim to nail.
+    Unity/Unreal/Godot's own texture importers each expose only a manual "flip green channel"
+    toggle, never auto-detection -- this mirrors that: a deliberate conversion the caller must
+    actually want, not a guess.
+    """
+    flipped = []
+    for name, img in _normal_map_images(materials).items():
+        len(img.pixels)  # force the lazy load (see look.py) before reading/writing
+        if img.channels < 2:
+            continue  # no green channel to flip -- shouldn't happen for a real normal map
+        px = np.array(img.pixels[:], dtype=np.float32).reshape(-1, img.channels)
+        px[:, 1] = 1.0 - px[:, 1]
+        img.pixels.foreach_set(px.ravel())
+        flipped.append(name)
+    return flipped
 
 
 def _set_all_colorspace(name: str) -> list:
@@ -1379,6 +1433,9 @@ def run(args):
     texture_colorspace_changed = []
     if args.get("texture_colorspace"):
         texture_colorspace_changed = _set_all_colorspace(args["texture_colorspace"])
+    normal_maps_flipped = []
+    if args.get("flip_normal_map_green"):
+        normal_maps_flipped = _flip_normal_map_green(list(bpy.data.materials))
 
     bones_removed = []
     bones_demoted = []
@@ -1449,6 +1506,7 @@ def run(args):
         "orphan_data_purged": purged,
         "colorspace_fixed": colorspace_fixed,
         "texture_colorspace_changed": texture_colorspace_changed,
+        "normal_maps_flipped": normal_maps_flipped,
         "bones_removed": bones_removed,
         "bones_demoted": bones_demoted,
         "keyframe_points_before": keyframes_decimated["keyframe_points_before"],

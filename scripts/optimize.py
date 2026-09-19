@@ -18,6 +18,7 @@ Usage:
   python3 scripts/optimize.py model.glb -o model_optimized.glb --draco
   python3 scripts/optimize.py model.glb -o model_optimized.glb --ktx2
   python3 scripts/optimize.py model.glb -o model_optimized.glb --generate-mipmaps mips/
+  python3 scripts/optimize.py model.glb -o model_optimized.glb --flip-normal-map-green
   python3 scripts/optimize.py model.glb -o model_optimized.glb --keyframe-decimate 0.01
   python3 scripts/optimize.py model.glb -o model_optimized.glb --remove-unused-shape-keys
   python3 scripts/optimize.py model.glb -o model_optimized.glb --instance-duplicate-meshes
@@ -61,6 +62,7 @@ def main() -> int:
     ap.add_argument("--webp-quality", type=int, metavar="0-100", help="WebP encode quality (default 75, Blender's own default); only used with --webp")
     ap.add_argument("--fix-colorspace", action="store_true", help="correct every texture colorspace mismatch info.py flags (Base Color/Emission not 'sRGB'; Metallic/Roughness/Alpha/a normal map's texture not 'Non-Color') based on which material socket it feeds")
     ap.add_argument("--texture-colorspace", metavar="NAME", help="force every texture's colorspace tag to NAME regardless of role (e.g. 'ACEScg', 'ACES2065-1', 'sRGB', 'Non-Color') -- a blunt override, not per-socket correction; see --fix-colorspace for that. Rejected together with --fix-colorspace.")
+    ap.add_argument("--flip-normal-map-green", action="store_true", help="invert the green (Y) channel of every texture genuinely wired as a tangent-space normal map (an Image Texture feeding a Normal Map node feeding a material's Normal input) -- the complete, sole pixel operation to convert between OpenGL (+Y) and DirectX (-Y) normal map convention (R/X and B/Z are shared and untouched). Does NOT auto-detect which convention a normal map is currently in -- no reliable general-case, pixel-data-only method for that exists (confirmed: even Adobe Substance 3D Painter can't do it either without an explicit tag, and Unity holds a patent for a statistical heuristic with no published reliability figures). glTF's own spec mandates OpenGL convention; Unity/Godot also expect OpenGL; Unreal expects DirectX -- use this deliberately when you know the source and target disagree, mirroring the same manual 'flip green channel' toggle every major engine's own texture importer exposes.")
     ap.add_argument("--remove-unused-bones", action="store_true", help="prune every bone with zero skin-weight influence and no animation, from the leaves inward -- never touches a bone a still-used descendant needs, or one that's animated")
     ap.add_argument("--max-bones", type=int, metavar="N", help="reduce each armature to at most N bones (a real budget cap, e.g. for mobile skinning limits): removes the lowest-influence unanimated leaf bones first (including genuinely unused ones, for free), transferring each one's skin weight to its parent. Never removes an animated bone -- warns instead if the cap can't be reached without one.")
     ap.add_argument("--keyframe-decimate", type=float, metavar="TOLERANCE", help="reduce every action's keyframe count via Ramer-Douglas-Peucker curve simplification: a keyframe is dropped only if its own interpolation mode's real curve (LINEAR or CONSTANT only -- the two modes where the post-removal value is exactly computable) would deviate by at most TOLERANCE from its real value (in that fcurve's own units -- Blender units for location, radians for rotation, unitless for scale). A BEZIER-governed keyframe (Blender's own default for a hand-keyed action) or any other interpolation is never removed -- a glTF import is exclusively LINEAR, so this is not a hobbled feature for that common case. The first/last keyframe of every fcurve always survives. Must be a finite number > 0.")
@@ -116,6 +118,7 @@ def main() -> int:
             "point_thin_voxel": args.point_thin_voxel,
             "webp": args.webp, "webp_quality": args.webp_quality,
             "fix_colorspace": args.fix_colorspace, "texture_colorspace": args.texture_colorspace,
+            "flip_normal_map_green": args.flip_normal_map_green,
             "remove_unused_bones": args.remove_unused_bones, "max_bones": args.max_bones,
             "keyframe_decimate": args.keyframe_decimate,
             "remove_unused_shape_keys": args.remove_unused_shape_keys,
@@ -208,6 +211,8 @@ def main() -> int:
             print(f"  fixed colorspace on {data['colorspace_fixed']} texture reference(s)")
         if data["texture_colorspace_changed"]:
             print(f"  set colorspace to {args.texture_colorspace!r} on: {', '.join(data['texture_colorspace_changed'])}")
+        if data["normal_maps_flipped"]:
+            print(f"  flipped the green channel on normal map(s): {', '.join(data['normal_maps_flipped'])}")
         if data["bones_removed"]:
             print(f"  removed {len(data['bones_removed'])} unused bone(s): {', '.join(data['bones_removed'])}")
         if data["bones_demoted"]:
