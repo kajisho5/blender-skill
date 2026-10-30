@@ -1,4 +1,18 @@
-# blender-skill
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/app-icon-dark.png">
+    <img src="brand/app-icon.png" width="128" alt="blender-skill app icon">
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/blender-skill-wordmark-white.svg">
+    <img src="brand/logo/blender-skill-wordmark-black.svg" height="48" alt="blender-skill">
+  </picture>
+</p>
+
+<p align="center"><b>Headless Blender pipeline for 3D assets</b></p>
 
 **Give your coding agent a 3D asset pipeline.** Local Blender, headless, no cloud, no API keys.
 
