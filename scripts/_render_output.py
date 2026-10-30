@@ -16,6 +16,10 @@ Alpha-capable outputs, the only ones `--transparent` accepts:
     a ProRes encoder (4.2 LTS), QuickTime Animation (QTRLE, argb), with a warning.
 H.264/MP4 has no alpha channel, so `--transparent -o x.mp4` is refused instead of silently
 dropping the alpha.
+
+`resolve_resolution()` turns `--resolution-preset NAME` / `--resolution W H` into the frame size
+(RM-058): an explicit W H wins over a preset, a preset wins over the 512x512 default; an unknown
+preset name is a SkillError(kind="input") listing the valid ones (docs/decisions.md ADR-1).
 """
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ import struct
 import subprocess
 import zlib
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from _common import SkillError
 
@@ -42,6 +46,46 @@ _H264_MP4 = {"format": "MPEG4", "codec": "H264"}
 # has it). QuickTime Animation (QTRLE, lossless RGBA, argb) is the alpha-carrying .mov such a
 # build does have; bpy/render.py moves to it only when PRORES is refused, and says so.
 _QTRLE_MOV = {"format": "QUICKTIME", "codec": "QTRLE"}
+
+
+# Named frame sizes for --resolution-preset (RM-058). Each is the size of one rendered frame: a
+# thumbnail, every turntable frame/video frame, and every tile of a --sheet (which is 2x2 tiles).
+# All dimensions are even, so a preset is always valid for H.264's 4:2:0 chroma subsampling.
+RESOLUTION_PRESETS: Dict[str, Tuple[int, int]] = {
+    "thumbnail": (512, 512),   # render.py's own default size
+    "square": (1080, 1080),    # 1:1 social feed
+    "720p": (1280, 720),       # HD
+    "1080p": (1920, 1080),     # Full HD
+    "4k": (3840, 2160),        # UHD-1 (consumer 4K), not DCI 4096x2160
+    "vertical": (1080, 1920),  # 9:16 short-form / stories
+}
+DEFAULT_RESOLUTION_PRESET = "thumbnail"
+
+
+def resolve_resolution(preset: Optional[str] = None,
+                       explicit: Optional[Sequence[int]] = None) -> Dict[str, Any]:
+    """The frame size for one render: `{"width", "height", "preset", "source"}`. `explicit`
+    (--resolution W H) wins over `preset` (--resolution-preset NAME), which wins over the
+    default; when both are given the overridden preset is reported as `overridden_preset`.
+    Preset names are matched case-insensitively. Raises SkillError(kind="input") for an
+    unknown preset name or a non-positive explicit size."""
+    name = preset.strip().lower() if preset is not None else None
+    if name is not None and name not in RESOLUTION_PRESETS:
+        raise SkillError(f"unknown resolution preset: {preset!r}", kind="input",
+                         hint="valid presets: " + ", ".join(RESOLUTION_PRESETS)
+                         + "; or give --resolution W H")
+    if explicit is not None:
+        width, height = (int(v) for v in explicit)
+        if width <= 0 or height <= 0:
+            raise SkillError(f"--resolution needs two positive integers (got {width} {height})", kind="input")
+        result: Dict[str, Any] = {"width": width, "height": height, "preset": None, "source": "explicit"}
+        if name is not None:
+            result["overridden_preset"] = name
+        return result
+    source = "preset" if name is not None else "default"
+    name = name or DEFAULT_RESOLUTION_PRESET
+    width, height = RESOLUTION_PRESETS[name]
+    return {"width": width, "height": height, "preset": name, "source": source}
 
 
 def sequence_path(output: str) -> str:

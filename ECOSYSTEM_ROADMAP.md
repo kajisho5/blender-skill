@@ -27,7 +27,7 @@ Not reachable from the agent. Turntable MP4 is encoded by Blender's own FFmpeg, 
   - Done when: test
 - [x] **3. Transparent / sequence output for compositing** — `--transparent`, PNG sequence or ProRes 4444; sequence -> ffmpeg-skill/sequence — [#171](https://github.com/kajisho5/blender-skill/pull/171)
   - Done when: alpha verified on an output frame
-- [ ] **4. Video resolution presets (RM-058)** — 1080p / 4K / vertical
+- [x] **4. Video resolution presets (RM-058)** — 1080p / 4K / vertical — [#172](https://github.com/kajisho5/blender-skill/pull/172)
   - Done when: test per preset
 - [ ] **5. (agent side) SkillSpec render_3d** — CONFIRM; output becomes a B-roll asset for ffmpeg-skill/overlay
   - Done when: tracked in video-production-agent

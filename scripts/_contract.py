@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "mcp"))
 import _delegate  # noqa: E402
+import _render_output  # noqa: E402
 import _run  # noqa: E402
 import server  # noqa: E402
 from _common import SkillError, emit  # noqa: E402
@@ -36,6 +37,22 @@ MIN_BLENDER = (4, 2)
 
 def provides() -> List[Dict[str, str]]:
     return [{"id": f"3d.{name}", "lifecycle": "EXPERIMENTAL", "tool_id": f"{SKILL_ID}/{name}"} for name in server.TOOLS]
+
+
+def tool_options() -> Dict[str, Dict[str, Any]]:
+    """Enumerated option values a caller can choose from, per tool, read from the same tables the
+    scripts validate against (so the contract cannot list a value the CLI would refuse)."""
+    return {
+        "render": {
+            "--resolution-preset": {
+                "choices": list(_render_output.RESOLUTION_PRESETS),
+                "values": {k: {"width": w, "height": h} for k, (w, h) in _render_output.RESOLUTION_PRESETS.items()},
+                "default": _render_output.DEFAULT_RESOLUTION_PRESET,
+                "precedence": ["--resolution W H", "--resolution-preset NAME", "default"],
+                "invalid": {"kind": "input", "exit_code": 1},
+            },
+        },
+    }
 
 
 def build() -> Dict[str, Any]:
@@ -56,7 +73,8 @@ def build() -> Dict[str, Any]:
         },
         "not_provided": ["interactive modeling", "video editing or encoding through ffmpeg-skill",
                          "network access of any kind", "API keys or cloud rendering"],
-        "tools": [{"tool_id": f"{SKILL_ID}/{name}", "script": f"scripts/{name}.py", "description": server._DESCRIPTIONS[name]}
+        "tools": [dict({"tool_id": f"{SKILL_ID}/{name}", "script": f"scripts/{name}.py", "description": server._DESCRIPTIONS[name]},
+                       **({"options": tool_options()[name]} if name in tool_options() else {}))
                   for name in server.TOOLS],
         "execution": {"canonical_invocation": ["python3", "scripts/<tool>.py", "...", "--json"], "network": False, "shell": False,
                       "engine": "blender -b --factory-startup (headless), arguments and results as JSON files"},

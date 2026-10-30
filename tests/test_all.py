@@ -2238,5 +2238,174 @@ class TestTransparentRender(unittest.TestCase):
         self.assertEqual(info["min"], 0)
         self.assertEqual(info["max"], 255)
 
+
+class TestResolutionPresets(unittest.TestCase):
+    """render.py --resolution-preset (RM-058, docs/decisions.md ADR-1) -- no Blender needed: the
+    size resolution, the --dry-run args handed to Blender, the structured error for an unknown
+    name, and the contract/MCP listing. The real rendered size is TestResolutionPresetRender."""
+
+    EXPECTED = {"thumbnail": (512, 512), "square": (1080, 1080), "720p": (1280, 720),
+                "1080p": (1920, 1080), "4k": (3840, 2160), "vertical": (1080, 1920)}
+
+    @classmethod
+    def setUpClass(cls):
+        import _render_output
+        cls.ro = _render_output
+
+    def _dry_run(self, *argv, out="t.png"):
+        with tempfile.TemporaryDirectory() as tmp:
+            return run("render.py", str(FIXTURE), "-o", str(Path(tmp) / out), "--dry-run", "--json", *argv)
+
+    def test_preset_table_is_exactly_the_documented_sizes(self):
+        self.assertEqual(self.ro.RESOLUTION_PRESETS, self.EXPECTED)
+        for w, h in self.ro.RESOLUTION_PRESETS.values():
+            self.assertEqual((w % 2, h % 2), (0, 0))  # H.264 4:2:0 needs even sizes
+
+    def test_each_preset_reaches_blender_as_its_size(self):
+        for name, (w, h) in self.EXPECTED.items():
+            with self.subTest(preset=name):
+                proc = self._dry_run("--resolution-preset", name)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                out = json.loads(proc.stdout)
+                self.assertEqual(out["args"]["resolution"], [w, h])
+                self.assertEqual(out["resolution"], {"width": w, "height": h, "preset": name, "source": "preset"})
+
+    def test_1080p_4k_and_vertical_turntable_video(self):
+        for name, size in (("1080p", [1920, 1080]), ("4k", [3840, 2160]), ("vertical", [1080, 1920])):
+            with self.subTest(preset=name):
+                proc = self._dry_run("--turntable", "--resolution-preset", name, out="turn.mp4")
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                args = json.loads(proc.stdout)["args"]
+                self.assertEqual(args["resolution"], size)
+                self.assertEqual(args["output_settings"]["ffmpeg"]["codec"], "H264")
+
+    def test_preset_names_are_case_insensitive(self):
+        self.assertEqual(self.ro.resolve_resolution("4K")["preset"], "4k")
+        self.assertEqual(self.ro.resolve_resolution(" Vertical ")["preset"], "vertical")
+
+    def test_default_is_the_thumbnail_size(self):
+        self.assertEqual(self.ro.resolve_resolution(),
+                         {"width": 512, "height": 512, "preset": "thumbnail", "source": "default"})
+        out = json.loads(self._dry_run().stdout)
+        self.assertEqual(out["args"]["resolution"], [512, 512])
+
+    def test_explicit_resolution_wins_over_a_preset(self):
+        r = self.ro.resolve_resolution("4k", (640, 360))
+        self.assertEqual(r, {"width": 640, "height": 360, "preset": None, "source": "explicit",
+                             "overridden_preset": "4k"})
+        out = json.loads(self._dry_run("--resolution-preset", "4k", "--resolution", "640", "360").stdout)
+        self.assertEqual(out["args"]["resolution"], [640, 360])
+        self.assertEqual(out["resolution"]["overridden_preset"], "4k")
+
+    def test_unknown_preset_is_a_structured_input_error(self):
+        from _common import SkillError
+        for bad in ("8k", "1080", "portrait", ""):
+            with self.subTest(preset=bad):
+                with self.assertRaises(SkillError) as ctx:
+                    self.ro.resolve_resolution(bad)
+                self.assertEqual(ctx.exception.kind, "input")
+                for name in self.EXPECTED:
+                    self.assertIn(name, ctx.exception.hint)
+        proc = self._dry_run("--resolution-preset", "8k")
+        self.assertEqual(proc.returncode, 1)
+        err = json.loads(proc.stdout)
+        self.assertEqual(err["status"], "error")
+        self.assertEqual(err["error"]["kind"], "input")
+        self.assertIn("unknown resolution preset: '8k'", err["error"]["message"])
+        self.assertIn("1080p", err["error"]["hint"])
+        # an unknown preset is refused even when an explicit --resolution would have won
+        proc = self._dry_run("--resolution-preset", "8k", "--resolution", "64", "64")
+        self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+        # without --json: one line on stderr, exit 1, nothing on stdout
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = run("render.py", str(FIXTURE), "-o", str(Path(tmp) / "t.png"), "--dry-run",
+                       "--resolution-preset", "8k")
+        self.assertEqual((proc.returncode, proc.stdout), (1, ""))
+        self.assertTrue(proc.stderr.startswith("error: unknown resolution preset"), proc.stderr)
+
+    def test_non_positive_explicit_resolution_is_an_input_error(self):
+        proc = self._dry_run("--resolution", "0", "1080")
+        self.assertEqual(proc.returncode, 1)
+        self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+
+    def test_contract_and_mcp_list_the_presets(self):
+        c = json.loads(run("_contract.py", "--json").stdout)
+        render = next(t for t in c["tools"] if t["tool_id"] == "blender-skill/render")
+        opt = render["options"]["--resolution-preset"]
+        self.assertEqual(opt["choices"], list(self.EXPECTED))
+        self.assertEqual({k: (v["width"], v["height"]) for k, v in opt["values"].items()}, self.EXPECTED)
+        self.assertEqual(opt["default"], "thumbnail")
+        self.assertEqual(opt["precedence"][0], "--resolution W H")
+        self.assertEqual(opt["invalid"], {"kind": "input", "exit_code": 1})
+        self.assertEqual([t for t in c["tools"] if "options" in t], [render])
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        for name in self.EXPECTED:
+            self.assertIn(name, server._DESCRIPTIONS["render"])
+
+    def test_mcp_call_with_an_unknown_preset_returns_the_structured_error(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        with tempfile.TemporaryDirectory() as tmp:
+            res = server.call_tool("render", {"argv": [str(FIXTURE), "-o", str(Path(tmp) / "t.png"),
+                                                       "--resolution-preset", "8k", "--dry-run"]})
+        self.assertEqual(res["structuredContent"]["status"], "error")
+        self.assertEqual(res["structuredContent"]["error"]["kind"], "input")
+
+
+@unittest.skipUnless(_blender_available(), "no Blender found (see scripts/_run.py's search order)")
+class TestResolutionPresetRender(unittest.TestCase):
+    """--resolution-preset against a real Blender: the size is read back from the written file's
+    own header, not taken from the tool's report. CI runs this class in the render job."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = Path(self.tmp.name)
+
+    def _render(self, *argv):
+        proc = run("render.py", str(FIXTURE), *argv, "--fast", "--samples", "1", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return json.loads(proc.stdout)
+
+    def _check_thumbnail(self, name, size):
+        png = self.out / f"{name}.png"
+        data = self._render("--resolution-preset", name, "-o", str(png))
+        self.assertEqual(_png_dims(png), size)
+        self.assertEqual((data["resolution"]["width"], data["resolution"]["height"]), size)
+        self.assertEqual(data["resolution"]["preset"], name)
+
+    def test_1080p_thumbnail(self):
+        self._check_thumbnail("1080p", (1920, 1080))
+
+    def test_4k_thumbnail(self):
+        self._check_thumbnail("4k", (3840, 2160))
+
+    def test_vertical_thumbnail(self):
+        self._check_thumbnail("vertical", (1080, 1920))
+
+    def test_square_720p_and_thumbnail_presets(self):
+        for name, size in (("square", (1080, 1080)), ("720p", (1280, 720)), ("thumbnail", (512, 512))):
+            with self.subTest(preset=name):
+                self._check_thumbnail(name, size)
+
+    def test_explicit_resolution_wins_on_the_written_file(self):
+        png = self.out / "explicit.png"
+        data = self._render("--resolution-preset", "4k", "--resolution", "96", "64", "-o", str(png))
+        self.assertEqual(_png_dims(png), (96, 64))
+        self.assertEqual(data["resolution"]["overridden_preset"], "4k")
+
+    @unittest.skipUnless(shutil.which("ffprobe"), "ffprobe not installed")
+    def test_vertical_turntable_mp4_is_1080x1920(self):
+        mp4 = self.out / "reel.mp4"
+        data = self._render("--turntable", "--frames", "2", "--resolution-preset", "vertical", "-o", str(mp4))
+        if data["kind"] != "video":
+            self.skipTest(f"this Blender build has no FFmpeg output: {data.get('warning')}")
+        proc = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                               "stream=width,height", "-of", "json", str(mp4)], capture_output=True, text=True)
+        stream = json.loads(proc.stdout)["streams"][0]
+        self.assertEqual((stream["width"], stream["height"]), (1080, 1920))
+
+
 if __name__ == "__main__":
     unittest.main()

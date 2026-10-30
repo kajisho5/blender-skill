@@ -271,7 +271,9 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   a 4-view sheet. Eevee by default, `--cycles` to switch. `--transparent` keeps the alpha for
   compositing -- an RGBA PNG (still or sequence) or a ProRes 4444 `.mov` -- and verifies it on
   the written output; a PNG sequence comes with the `--dir`/`--pattern` ffmpeg-skill's
-  `sequence.py` takes.
+  `sequence.py` takes. `--resolution-preset` names the frame size -- `1080p` (1920x1080), `4k`
+  (3840x2160), `vertical` (1080x1920), `square`, `720p`, `thumbnail` (512x512, the default);
+  an explicit `--resolution W H` wins over a preset (`docs/decisions.md` ADR-1).
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a
   before/after comparison (with a pure-numpy PSNR/SSIM similarity score when the two images share
   pixel dimensions), or the UV layout (as SVG -- headless Blender's PNG UV export needs a GPU
@@ -310,6 +312,7 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 "convert this fbx to usdz and confirm it worked" -> convert.py model.fbx -o model.usdz --verify
 "make a turntable of this model"             -> render.py model.glb --turntable -o turntable.mp4
 "a turntable I can composite over footage"   -> render.py model.glb --turntable --transparent -o turntable.mov
+"a 9:16 turntable for a short"               -> render.py model.glb --turntable --resolution-preset vertical -o reel.mp4
 "bake this material to a single texture"     -> bake.py model.glb --pass combined -o baked.png
 ```
 

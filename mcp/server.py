@@ -24,6 +24,7 @@ HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 from _version import __version__  # noqa: E402 -- the one version source release-please bumps
+from _render_output import RESOLUTION_PRESETS  # noqa: E402 -- render's named frame sizes (RM-058)
 
 PROTOCOL_VERSION = "2024-11-05"
 
@@ -36,7 +37,8 @@ _DESCRIPTIONS = {
     "anim": "Extract animation-only data (armature + actions, no mesh) from a file, or combine several files' actions onto one base character (a Mixamo-style workflow).",
     "lod": "Batch-generate LOD0 (original) through LOD3 files at decreasing triangle counts, one output file per level.",
     "optimize": "Decimate, weld vertices, recalc normals, triangulate, cap texture size, purge unused data.",
-    "render": "Render a thumbnail, turntable animation, or 4-view sheet.",
+    "render": "Render a thumbnail, turntable animation, or 4-view sheet. Frame size: --resolution-preset "
+              + "|".join(RESOLUTION_PRESETS) + " or an explicit --resolution W H (wins over the preset).",
     "look": "UV layout, wireframe render, texture grid, or before/after comparison image.",
     "check": "PASS/WARN/FAIL a file against a delivery target's budget (three.js, Unity, Unreal, Godot, iOS/Android AR, WebXR, 3D printing, Sketchfab).",
     "fit": "Automatically re-optimize in escalating stages until a file fits a check.py target's own budget, or report honestly that it still doesn't.",

@@ -68,7 +68,7 @@ what v0.1.0 actually does.
 | RM-055 | render | 複数アセットのコンタクトシート（ライブラリ一覧用） | planned | #46 |
 | RM-056 | render | Cycles GPU検出とフォールバック | planned | #47 |
 | RM-057 | render | レンダ時間の事前見積り（`--estimate`） | planned | #48 |
-| RM-058 | render | 解像度プリセット（thumbnail/social/4k） | planned | #49 |
+| RM-058 | render | 解像度プリセット（thumbnail/social/4k） | done | #49 |
 | RM-059 | render | Freestyle線画レンダ | planned | #50 |
 | RM-060 | render | デプス/ノーマル/IDパスの出力（ML/合成用） | planned | #51 |
 | RM-061 | bake | Combined/Diffuse/Normal/AO/Roughness/Metallic/Emission の個別・一括 | planned | #52 |
