@@ -2016,5 +2016,219 @@ class TestContract(unittest.TestCase):
             self.assertEqual(d["checks"]["blender"]["status"], "fail")
 
 
+
+class TestMcpServer(unittest.TestCase):
+    """mcp/server.py over real stdio JSON-RPC, no Blender needed."""
+
+    def test_initialize_reports_the_package_version(self):
+        from _version import __version__
+        msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "method": "notifications/initialized"}]
+        proc = subprocess.run([sys.executable, str(ROOT / "mcp" / "server.py")],
+                              input="".join(json.dumps(m) + "\n" for m in msgs),
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        reply = json.loads(proc.stdout.splitlines()[0])
+        self.assertEqual(reply["id"], 1)
+        self.assertEqual(reply["result"]["serverInfo"], {"name": "blender-skill", "version": __version__})
+
+
+def _write_rgba_png(path, rows, filters=None) -> None:
+    """An 8-bit RGBA PNG from rows of (r, g, b, a) tuples, each scanline encoded with the given
+    PNG filter type (0-4) so _render_output.png_alpha's unfiltering is exercised for real."""
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+
+    h, w, bpp = len(rows), len(rows[0]), 4
+    raw, prev = b"", bytes(w * bpp)
+    for y, row in enumerate(rows):
+        ftype = (filters or [0] * h)[y]
+        line = bytes(c for px in row for c in px)
+        out = bytearray()
+        for i, x in enumerate(line):
+            a = line[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if ftype == 0:
+                pred = 0
+            elif ftype == 1:
+                pred = a
+            elif ftype == 2:
+                pred = b
+            elif ftype == 3:
+                pred = (a + b) // 2
+            else:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pred = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+            out.append((x - pred) & 0xFF)
+        raw += bytes([ftype]) + bytes(out)
+        prev = line
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
+    Path(path).write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+                           + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+class TestRenderOutput(unittest.TestCase):
+    """scripts/_render_output.py: the render output settings render.py hands to Blender, and
+    the PNG alpha read-back -- no Blender needed (the real render is TestTransparentRender)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import _render_output
+        cls.ro = _render_output
+
+    def test_transparent_still_is_an_rgba_png_with_a_transparent_film(self):
+        s = self.ro.output_settings("thumbnail", "/x/thumb.png", transparent=True)
+        self.assertTrue(s["film_transparent"])
+        self.assertEqual(s["image_settings"], {"file_format": "PNG", "color_mode": "RGBA", "color_depth": "8"})
+        self.assertEqual((s["kind"], s["filepath"]), ("still", "/x/thumb.png"))
+
+    def test_transparent_still_refuses_a_format_without_alpha(self):
+        from _common import SkillError
+        for mode in ("thumbnail", "sheet"):
+            with self.assertRaises(SkillError) as ctx:
+                self.ro.output_settings(mode, "/x/thumb.jpg", transparent=True)
+            self.assertEqual(ctx.exception.kind, "input")
+
+    def test_transparent_mov_is_prores_4444_with_rgba(self):
+        s = self.ro.output_settings("turntable", "/x/turn.mov", transparent=True, fps=30, frames=12)
+        self.assertEqual(s["kind"], "video")
+        self.assertTrue(s["film_transparent"])
+        self.assertEqual(s["image_settings"], {"file_format": "FFMPEG", "color_mode": "RGBA"})
+        self.assertEqual(s["ffmpeg"], {"format": "QUICKTIME", "codec": "PRORES", "ffmpeg_prores_profile": "4444"})
+        # a build without FFmpeg falls back to an RGBA PNG sequence, not an opaque one
+        self.assertEqual(s["fallback"]["filepath"], "/x/turn_####.png")
+        self.assertEqual(s["fallback"]["image_settings"]["color_mode"], "RGBA")
+
+    def test_transparent_mp4_is_refused(self):
+        from _common import SkillError
+        with self.assertRaises(SkillError) as ctx:
+            self.ro.output_settings("turntable", "/x/turn.mp4", transparent=True)
+        self.assertEqual(ctx.exception.kind, "input")
+        self.assertIn("H.264", ctx.exception.message)
+
+    def test_opaque_mp4_keeps_h264(self):
+        s = self.ro.output_settings("turntable", "/x/turn.mp4")
+        self.assertEqual(s["ffmpeg"], {"format": "MPEG4", "codec": "H264"})
+        self.assertNotIn("color_mode", s["image_settings"])
+
+    def test_png_sequence_is_handed_to_ffmpeg_skill_sequence(self):
+        s = self.ro.output_settings("turntable", "/x/frames/turn_####.png", transparent=True, fps=25, frames=10)
+        self.assertEqual(s["kind"], "image_sequence")
+        self.assertEqual(s["image_settings"]["color_mode"], "RGBA")
+        seq = s["sequence"]
+        self.assertEqual((seq["dir"], seq["pattern"], seq["start_number"], seq["fps"], seq["frames"]),
+                         ("/x/frames", "turn_%04d.png", 1, 25, 10))
+        self.assertEqual(seq["first_frame"], "/x/frames/turn_0001.png")
+        # ffmpeg-skill scripts/sequence.py's own flags (read-only interface, not modified here)
+        self.assertEqual(seq["ffmpeg_skill_sequence_argv"],
+                         ["--dir", "/x/frames", "--pattern", "turn_%04d.png", "--fps", "25", "--start-number", "1"])
+
+    def test_sequence_path_without_a_frame_marker_gets_one(self):
+        self.assertEqual(self.ro.sequence_path("/x/turn.png"), "/x/turn_####.png")
+        self.assertEqual(self.ro.sequence_path("/x/turn_##.png"), "/x/turn_##.png")
+        self.assertEqual(self.ro.printf_pattern("a#b_###.png"), "a#b_%03d.png")
+
+    def test_render_dry_run_shows_the_settings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "turn.mov"
+            proc = run("render.py", str(FIXTURE), "--turntable", "--transparent", "-o", str(out), "--dry-run")
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            s = json.loads(proc.stdout)["args"]["output_settings"]
+            self.assertEqual(s["ffmpeg"]["codec"], "PRORES")
+            proc = run("render.py", str(FIXTURE), "--turntable", "--transparent", "-o", str(Path(tmp) / "t.mp4"),
+                       "--dry-run", "--json")
+            self.assertEqual(proc.returncode, 1)
+            self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+
+    def test_png_alpha_decodes_every_filter_type(self):
+        clear, solid = (0, 0, 0, 0), (200, 100, 50, 255)
+        rows = [[clear, clear, solid], [clear, solid, solid], [solid, (9, 9, 9, 128), clear],
+                [clear, clear, clear], [solid, solid, solid]]
+        with tempfile.TemporaryDirectory() as tmp:
+            png = Path(tmp) / "a.png"
+            _write_rgba_png(png, rows, filters=[0, 1, 2, 3, 4])
+            info = self.ro.png_alpha(str(png))
+            self.assertEqual((info["width"], info["height"], info["has_alpha"]), (3, 5, True))
+            self.assertEqual((info["min"], info["max"], info["transparent_pixels"]), (0, 255, 7))
+            self.assertTrue(self.ro.alpha_report(str(png))["verified"])
+            opaque = Path(tmp) / "rgb.png"
+            _write_solid_png(opaque, 4, 4, (1, 2, 3))
+            report = self.ro.alpha_report(str(opaque))
+            self.assertFalse(report["verified"])
+            self.assertEqual(report["reason"], "no alpha channel")
+
+    @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe not installed")
+    def test_video_alpha_report_tells_prores_4444_from_h264(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mov, mp4 = Path(tmp) / "a.mov", Path(tmp) / "b.mp4"
+            src = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red@0.5:s=32x32:d=0.1,format=rgba"]
+            subprocess.run(src + ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", str(mov)],
+                           check=True)
+            subprocess.run(src + ["-c:v", "libx264", "-pix_fmt", "yuv420p", str(mp4)], check=True)
+            report = self.ro.video_alpha_report(str(mov))
+            self.assertTrue(report["verified"], report)
+            self.assertEqual(report["codec"], "prores")
+            report = self.ro.video_alpha_report(str(mp4))
+            self.assertFalse(report["verified"])
+            self.assertIn("no alpha channel", report["reason"])
+
+
+@unittest.skipUnless(_blender_available(), "no Blender found (see scripts/_run.py's search order)")
+class TestTransparentRender(unittest.TestCase):
+    """--transparent against a real Blender: the alpha is read back from the written frames, not
+    taken from the tool's own report. CI runs this class in the render job (Blender installed)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = Path(self.tmp.name)
+        import _render_output
+        self.ro = _render_output
+
+    def _render(self, *argv):
+        proc = run("render.py", str(FIXTURE), *argv, "--fast", "--resolution", "64", "64", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return json.loads(proc.stdout)
+
+    def test_transparent_thumbnail_has_alpha(self):
+        data = self._render("--transparent", "-o", str(self.out / "thumb.png"))
+        info = self.ro.png_alpha(str(self.out / "thumb.png"))
+        self.assertTrue(info["has_alpha"])
+        self.assertEqual(info["min"], 0)    # the empty background
+        self.assertEqual(info["max"], 255)  # the box itself
+        self.assertTrue(data["alpha"]["verified"])
+
+    def test_transparent_png_sequence_has_alpha_on_every_frame(self):
+        data = self._render("--turntable", "--transparent", "--frames", "2", "-o", str(self.out / "turn_####.png"))
+        self.assertEqual(data["kind"], "image_sequence")
+        self.assertEqual(data["color_mode"], "RGBA")
+        self.assertTrue(data["alpha"]["verified"])
+        seq = data["sequence"]
+        for n in (1, 2):
+            frame = Path(seq["dir"]) / (seq["pattern"] % n)
+            info = self.ro.png_alpha(str(frame))
+            self.assertTrue(info["has_alpha"])
+            self.assertEqual((info["min"], info["max"]), (0, 255))
+
+    @unittest.skipUnless(shutil.which("ffprobe") and shutil.which("ffmpeg"), "ffmpeg/ffprobe not installed")
+    def test_transparent_mov_is_prores_4444_with_alpha(self):
+        mov = self.out / "turn.mov"
+        data = self._render("--turntable", "--transparent", "--frames", "2", "-o", str(mov))
+        if data["kind"] != "video":
+            self.skipTest(f"this Blender build has no FFmpeg output: {data.get('warning')}")
+        self.assertTrue(data["alpha"]["verified"], data["alpha"])
+        self.assertEqual(data["alpha"]["codec"], "prores")
+        self.assertTrue(data["alpha"]["pix_fmt"].startswith("yuva"), data["alpha"])
+        # decode the first frame back to an RGBA PNG and check the alpha itself, not just the format
+        frame = self.out / "mov_frame.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(mov), "-frames:v", "1", "-pix_fmt", "rgba",
+                        str(frame)], check=True)
+        info = self.ro.png_alpha(str(frame))
+        self.assertTrue(info["has_alpha"])
+        self.assertEqual(info["min"], 0)
+        self.assertEqual(info["max"], 255)
+
 if __name__ == "__main__":
     unittest.main()

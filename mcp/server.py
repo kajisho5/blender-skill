@@ -22,6 +22,9 @@ from typing import Any, Dict, List
 
 HERE = Path(__file__).resolve().parent
 SCRIPTS = HERE.parent / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+from _version import __version__  # noqa: E402 -- the one version source release-please bumps
+
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = ["info", "convert", "split", "anim", "lod", "optimize", "render", "look", "check", "fit", "bake", "scene", "batch", "verify"]
@@ -100,7 +103,7 @@ def _handle(msg: Dict[str, Any]) -> None:
         _send({"jsonrpc": "2.0", "id": msg_id, "result": {
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
-            "serverInfo": {"name": "blender-skill", "version": "0.1.0"},
+            "serverInfo": {"name": "blender-skill", "version": __version__},
         }})
     elif method == "notifications/initialized":
         pass  # no response expected for a notification
