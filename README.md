@@ -328,6 +328,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 | `batch.py` | Recipe chains over a folder, with a content-hash cache |
 | `verify.py` | The whole toolchain over real files |
 
+`python3 scripts/_contract.py --json` prints the machine-readable contract (skill_id, version,
+provides[] in the AI Video Production OS registry shape, one entry per script above), and
+`python3 scripts/_contract.py doctor --json` reports whether Blender (4.2+), gltf-transform and
+ktx are found.
+
 See `references/pitfalls.md` for the real gotchas found building this (GPU-offscreen limits
 under `-b`, an Eevee engine-name rename between Blender versions, format round-trip quirks) and
 `references/blender-versions.md` for which Blender versions have actually been tested.
