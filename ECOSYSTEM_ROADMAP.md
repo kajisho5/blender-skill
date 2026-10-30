@@ -23,9 +23,9 @@ Not reachable from the agent. Turntable MP4 is encoded by Blender's own FFmpeg, 
 
 - [x] **1. `contract --json` + `doctor --json`** — skill_id, version, provides[] in the OS schema shape
   - Done when: OS schema validation passes
-- [ ] **2. MCP serverInfo.version from _version.py** — hard-coded 0.1.0 today
+- [x] **2. MCP serverInfo.version from _version.py** — hard-coded 0.1.0 today — [#171](https://github.com/kajisho5/blender-skill/pull/171)
   - Done when: test
-- [ ] **3. Transparent / sequence output for compositing** — `--transparent`, PNG sequence or ProRes 4444; sequence -> ffmpeg-skill/sequence
+- [x] **3. Transparent / sequence output for compositing** — `--transparent`, PNG sequence or ProRes 4444; sequence -> ffmpeg-skill/sequence — [#171](https://github.com/kajisho5/blender-skill/pull/171)
   - Done when: alpha verified on an output frame
 - [ ] **4. Video resolution presets (RM-058)** — 1080p / 4K / vertical
   - Done when: test per preset
