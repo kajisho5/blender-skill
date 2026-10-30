@@ -204,4 +204,11 @@ jobs:
           BLENDER: ${{ github.workspace }}/blender-install/blender
         run: python3 tests/test_all.py TestTransparentRender -v
 
+      # --resolution-preset against this real Blender: every preset's size read back from the
+      # written PNG's header, plus a vertical (1080x1920) turntable .mp4 via ffprobe.
+      - name: render.py --resolution-preset (1080p / 4k / vertical / ...) with the written size verified
+        env:
+          BLENDER: ${{ github.workspace }}/blender-install/blender
+        run: python3 tests/test_all.py TestResolutionPresetRender -v
+
       - run: python3 tests/test_all.py
