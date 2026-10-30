@@ -70,8 +70,57 @@ def _setup_scene(engine: str, resolution, samples):
     else:
         scene.eevee.taa_render_samples = samples
     scene.render.resolution_x, scene.render.resolution_y = resolution
-    scene.render.film_transparent = True
     return scene
+
+
+def _apply_image_settings(scene, image_settings):
+    """Set image_settings from the host-built dict (scripts/_render_output.py). file_format goes
+    first: the valid color_mode/color_depth values depend on it (and, for FFMPEG, on the codec,
+    so the bpy side sets color_mode after the codec -- see _apply_video)."""
+    fmt = image_settings["file_format"]
+    target = scene.render.image_settings
+    if hasattr(target, "media_type"):
+        # Blender 5.0+ splits image vs. video output: FFMPEG is only a valid file_format once
+        # media_type is VIDEO (and PNG only once it is IMAGE again, after a failed video try).
+        target.media_type = "VIDEO" if fmt == "FFMPEG" else "IMAGE"
+    target.file_format = fmt
+    if fmt != "FFMPEG":
+        for key in ("color_mode", "color_depth"):
+            if key in image_settings:
+                setattr(target, key, image_settings[key])
+
+
+def _apply_still(args, scene):
+    settings = args["output_settings"]
+    scene.render.film_transparent = settings["film_transparent"]
+    _apply_image_settings(scene, settings["image_settings"])
+
+
+def _apply_video(scene, settings):
+    """FFmpeg container/codec, then color_mode (RGBA is only offered once the codec carries
+    alpha). A codec this build lacks moves to the next of `ffmpeg_alternatives` (ProRes ->
+    QTRLE on 4.2 LTS); returns the warning saying so, or None. Raises if nothing is accepted,
+    rather than writing an opaque file."""
+    ff = scene.render.ffmpeg
+    choices = [settings["ffmpeg"]] + list(settings.get("ffmpeg_alternatives") or [])
+    errors = []
+    for choice in choices:
+        try:
+            for key, value in choice.items():
+                if key == "ffmpeg_prores_profile" and not hasattr(ff, key):
+                    continue  # builds without the profile choice: ProRes + RGBA is 4444 by itself
+                setattr(ff, key, value)
+            color_mode = settings["image_settings"].get("color_mode")
+            if color_mode:
+                scene.render.image_settings.color_mode = color_mode
+        except TypeError as exc:
+            errors.append(f"{choice.get('codec')}: {exc}")
+            continue
+        if choice is settings["ffmpeg"]:
+            return None
+        return (f"this Blender build has no {settings['ffmpeg']['codec']} encoder; wrote "
+                f"{choice['codec']} in {choice['format']} instead (alpha kept)")
+    raise RuntimeError("this Blender build accepts none of the alpha-capable video codecs: " + "; ".join(errors))
 
 
 def _mode_thumbnail(args, scene):
@@ -79,10 +128,10 @@ def _mode_thumbnail(args, scene):
     if not scene.camera:
         _add_camera(center, size)
     _add_lighting(args.get("light", "outdoor"))
-    scene.render.filepath = args["output"]
-    scene.render.image_settings.file_format = "PNG"
+    _apply_still(args, scene)
+    scene.render.filepath = args["output_settings"]["filepath"]
     bpy.ops.render.render(write_still=True)
-    return {}
+    return {"kind": "still"}
 
 
 def _mode_turntable(args, scene):
@@ -104,36 +153,37 @@ def _mode_turntable(args, scene):
         pivot.rotation_euler[2] = 2 * math.pi * (f - 1) / frames
         pivot.keyframe_insert("rotation_euler", index=2, frame=f)
 
-    output = args["output"]
+    settings = args["output_settings"]
+    scene.render.film_transparent = settings["film_transparent"]
     warning = None
-    wants_video = output.lower().endswith((".mp4", ".mov"))
-    ffmpeg_ok = False
-    if wants_video:
+    if settings["kind"] == "video":
         # bl_rna's static enum_items always lists 'FFMPEG' as a structurally possible value for
         # this property -- it does NOT reliably say whether *this* Blender build actually has
         # ffmpeg codec support compiled in (confirmed: a build that assigns it successfully and
         # one that raises on assignment can both report 'FFMPEG' present via enum_items). The
         # only authoritative check is trying the real assignment.
         try:
-            scene.render.image_settings.file_format = "FFMPEG"
-            ffmpeg_ok = True
+            _apply_image_settings(scene, settings["image_settings"])
         except TypeError:
-            pass
-    if ffmpeg_ok:
-        scene.render.ffmpeg.format = "MPEG4"
-        scene.render.ffmpeg.codec = "H264"
-        scene.render.filepath = output
-    else:
-        if wants_video:
             # No FFMPEG support in this Blender build -- fall back to a PNG sequence next to the
             # requested path rather than failing the whole render.
-            output = str(Path(output).with_name(Path(output).stem + "_####.png"))
+            fallback = settings["fallback"]
             warning = ("this Blender build has no FFMPEG video output support; wrote a PNG "
-                       f"sequence instead: {output}")
-        scene.render.image_settings.file_format = "PNG"
-        scene.render.filepath = output
+                       f"sequence instead: {fallback['filepath']}")
+            settings = {**settings, "kind": "image_sequence", **fallback}
+            _apply_image_settings(scene, settings["image_settings"])
+        else:
+            warning = _apply_video(scene, settings)
+    else:
+        _apply_image_settings(scene, settings["image_settings"])
+    scene.render.filepath = settings["filepath"]
     bpy.ops.render.render(animation=True)
-    result = {"frames": frames, "output_path": output}
+    result = {"kind": settings["kind"], "frames": frames, "output_path": settings["filepath"],
+              "color_mode": scene.render.image_settings.color_mode}
+    if settings["kind"] == "video":
+        result["codec"] = scene.render.ffmpeg.codec
+    if settings["kind"] == "image_sequence":
+        result["sequence"] = settings["sequence"]
     if warning:
         result["warning"] = warning
     return result
@@ -150,7 +200,7 @@ def _mode_sheet(args, scene):
         scene.camera = cam
         frame_path = str(tmp_dir / f"_sheet_tile_{i}.png")
         scene.render.filepath = frame_path
-        scene.render.image_settings.file_format = "PNG"
+        _apply_still(args, scene)
         bpy.ops.render.render(write_still=True)
         img = bpy.data.images.load(frame_path)
         px = np.array(img.pixels[:], dtype="float32").reshape(img.size[1], img.size[0], img.channels)
@@ -171,7 +221,7 @@ def _mode_sheet(args, scene):
     out_img.file_format = "PNG"
     out_img.save()
     bpy.data.images.remove(out_img)
-    return {"tiles": 4}
+    return {"kind": "still", "tiles": 4}
 
 
 _MODES = {"thumbnail": _mode_thumbnail, "turntable": _mode_turntable, "sheet": _mode_sheet}
@@ -187,7 +237,7 @@ def run(args):
     if mode not in _MODES:
         raise ValueError(f"unknown render mode {mode!r}")
     result = _MODES[mode](args, scene)
-    return {"mode": mode, "output_path": args["output"], **result}
+    return {"mode": mode, "output_path": args["output_settings"]["filepath"], **result}
 
 
 if __name__ == "__main__":

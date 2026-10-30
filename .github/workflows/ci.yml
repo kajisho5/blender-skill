@@ -146,8 +146,10 @@ jobs:
         with:
           python-version: "3.11"
 
+      # ffmpeg is only for TestTransparentRender's read-back of the ProRes 4444 .mov's alpha
+      # (ffprobe pix_fmt + decoding a frame); Blender encodes the video with its own FFmpeg.
       - name: Software OpenGL/EGL for headless Eevee/Cycles rendering
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libgles2 libegl-mesa0
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libgles2 libegl-mesa0 ffmpeg
 
       - name: Resolve Blender version
         id: ver
@@ -194,5 +196,12 @@ jobs:
           json.dump(spec, open('/tmp/scene.json', 'w'))
           "
           python3 scripts/scene.py /tmp/scene.json -o /tmp/scene_render.png
+
+      # --transparent against this real Blender: alpha read back from the written PNG frames and
+      # the ProRes 4444 .mov (tests/test_all.py's TestTransparentRender; skipped where no Blender).
+      - name: render.py --transparent (PNG sequence, ProRes 4444) with alpha verified
+        env:
+          BLENDER: ${{ github.workspace }}/blender-install/blender
+        run: python3 tests/test_all.py TestTransparentRender -v
 
       - run: python3 tests/test_all.py

@@ -268,7 +268,10 @@ budgets), and a live Blender connection for anything that needs a human's eye on
   would treat two Color Ramp nodes with completely different ramps as identical (see
   `references/pitfalls.md`).
 - **`render.py`** -- a thumbnail, a 360° turntable (PNG sequence or an FFmpeg-encoded video), or
-  a 4-view sheet. Eevee by default, `--cycles` to switch.
+  a 4-view sheet. Eevee by default, `--cycles` to switch. `--transparent` keeps the alpha for
+  compositing -- an RGBA PNG (still or sequence) or a ProRes 4444 `.mov` -- and verifies it on
+  the written output; a PNG sequence comes with the `--dir`/`--pattern` ffmpeg-skill's
+  `sequence.py` takes.
 - **`look.py`** -- the agent's eyes: a wireframe render, a grid of every texture in the file, a
   before/after comparison (with a pure-numpy PSNR/SSIM similarity score when the two images share
   pixel dimensions), or the UV layout (as SVG -- headless Blender's PNG UV export needs a GPU
@@ -306,6 +309,7 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 "cut this to 50k triangles"                  -> info.py, then optimize.py --decimate-ratio ...
 "convert this fbx to usdz and confirm it worked" -> convert.py model.fbx -o model.usdz --verify
 "make a turntable of this model"             -> render.py model.glb --turntable -o turntable.mp4
+"a turntable I can composite over footage"   -> render.py model.glb --turntable --transparent -o turntable.mov
 "bake this material to a single texture"     -> bake.py model.glb --pass combined -o baked.png
 ```
 
