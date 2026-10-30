@@ -21,7 +21,7 @@ Not reachable from the agent. Turntable MP4 is encoded by Blender's own FFmpeg, 
 
 ## Steps
 
-- [ ] **1. `contract --json` + `doctor --json`** — skill_id, version, provides[] in the OS schema shape
+- [x] **1. `contract --json` + `doctor --json`** — skill_id, version, provides[] in the OS schema shape
   - Done when: OS schema validation passes
 - [ ] **2. MCP serverInfo.version from _version.py** — hard-coded 0.1.0 today
   - Done when: test

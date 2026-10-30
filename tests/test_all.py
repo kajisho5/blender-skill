@@ -1983,5 +1983,38 @@ class TestFitInternals(unittest.TestCase):
         self.assertEqual(data["error"]["kind"], "timeout")
 
 
+
+class TestContract(unittest.TestCase):
+    """scripts/_contract.py: the AI Video Production OS registry shape, no Blender needed."""
+
+    def test_contract_has_the_os_registry_keys(self):
+        proc = run("_contract.py", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        c = json.loads(proc.stdout)
+        for k in ("skill_id", "version", "contract_version", "provides", "dependencies", "not_provided"):
+            self.assertIn(k, c)
+        self.assertEqual(c["skill_id"], "blender-skill")
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from _version import __version__
+        self.assertEqual(c["version"], __version__)
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        self.assertEqual([p["tool_id"] for p in c["provides"]], [f"blender-skill/{n}" for n in server.TOOLS])
+        ids = [p["id"] for p in c["provides"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        for p in c["provides"]:
+            self.assertEqual(set(p), {"id", "lifecycle", "tool_id"})
+            self.assertIn(p["lifecycle"], ("PROPOSED", "EXPERIMENTAL", "STABLE", "DEPRECATED", "RETIRED"))
+        self.assertFalse(c["execution"]["network"])
+
+    def test_doctor_reports_json_with_or_without_blender(self):
+        proc = run("_contract.py", "doctor", "--json")
+        d = json.loads(proc.stdout)
+        self.assertEqual(set(d["checks"]), {"python", "blender", "gltf-transform", "ktx"})
+        self.assertEqual(proc.returncode, 0 if d["ok"] else 2)
+        if not _blender_available():
+            self.assertEqual(d["checks"]["blender"]["status"], "fail")
+
+
 if __name__ == "__main__":
     unittest.main()
