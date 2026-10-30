@@ -11,6 +11,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   skill-frontmatter:
     runs-on: ubuntu-latest
@@ -51,9 +54,11 @@ jobs:
         with:
           node-version: "20"
 
+      # The skills CLI is pinned to an exact npm version so CI never runs an unreviewed new release of
+      # third-party code; bump it deliberately.
       - name: npx skills add . --list finds exactly this skill
         run: |
-          if npx --yes skills add . --list > /tmp/skills-list.txt 2>&1; then
+          if npx --yes skills@1.7.4 add . --list > /tmp/skills-list.txt 2>&1; then
             cat /tmp/skills-list.txt
             grep -q "blender-skill" /tmp/skills-list.txt || { echo "::error::'skills add . --list' did not list blender-skill"; exit 1; }
           else

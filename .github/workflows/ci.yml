@@ -25,6 +25,9 @@ env:
   BLENDER_LTS_1: "4.2.23"
   BLENDER_LTS_2: "4.5.13"
 
+permissions:
+  contents: read
+
 jobs:
   resolve-latest:
     runs-on: ubuntu-latest
