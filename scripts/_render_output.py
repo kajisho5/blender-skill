@@ -12,7 +12,8 @@ Alpha-capable outputs, the only ones `--transparent` accepts:
   - a still (thumbnail/sheet): 8-bit RGBA PNG
   - a turntable as an image sequence: 8-bit RGBA PNGs, `<name>_####.png`
   - a turntable as a video: QuickTime .mov, ProRes 4444 (yuva444p10le), the standard
-    alpha-carrying intermediate for compositing/NLE handoff.
+    alpha-carrying intermediate for compositing/NLE handoff -- or, on a Blender build without
+    a ProRes encoder (4.2 LTS), QuickTime Animation (QTRLE, argb), with a warning.
 H.264/MP4 has no alpha channel, so `--transparent -o x.mp4` is refused instead of silently
 dropping the alpha.
 """
@@ -37,6 +38,10 @@ _PNG_RGBA = {"file_format": "PNG", "color_mode": "RGBA", "color_depth": "8"}
 # color mode is RGBA, so the bpy side sets it only if the property is there.
 _PRORES_4444 = {"format": "QUICKTIME", "codec": "PRORES", "ffmpeg_prores_profile": "4444"}
 _H264_MP4 = {"format": "MPEG4", "codec": "H264"}
+# Blender 4.2 LTS has no PRORES codec at all (confirmed in CI: `enum "PRORES" not found`; 4.5
+# has it). QuickTime Animation (QTRLE, lossless RGBA, argb) is the alpha-carrying .mov such a
+# build does have; bpy/render.py moves to it only when PRORES is refused, and says so.
+_QTRLE_MOV = {"format": "QUICKTIME", "codec": "QTRLE"}
 
 
 def sequence_path(output: str) -> str:
@@ -99,6 +104,7 @@ def output_settings(mode: str, output: str, *, transparent: bool = False, fps: i
             kind="video", filepath=output,
             image_settings={"file_format": "FFMPEG", "color_mode": "RGBA"} if transparent else {"file_format": "FFMPEG"},
             ffmpeg=video,
+            ffmpeg_alternatives=[dict(_QTRLE_MOV)] if transparent else [],
             # used only if this Blender build has no FFmpeg support (see bpy/render.py)
             fallback={"filepath": fallback,
                       "image_settings": dict(_PNG_RGBA) if transparent else {"file_format": "PNG"},

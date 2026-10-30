@@ -2097,6 +2097,8 @@ class TestRenderOutput(unittest.TestCase):
         self.assertTrue(s["film_transparent"])
         self.assertEqual(s["image_settings"], {"file_format": "FFMPEG", "color_mode": "RGBA"})
         self.assertEqual(s["ffmpeg"], {"format": "QUICKTIME", "codec": "PRORES", "ffmpeg_prores_profile": "4444"})
+        # Blender 4.2 LTS has no PRORES: QuickTime Animation (RGBA) is the alpha-carrying .mov there
+        self.assertEqual(s["ffmpeg_alternatives"], [{"format": "QUICKTIME", "codec": "QTRLE"}])
         # a build without FFmpeg falls back to an RGBA PNG sequence, not an opaque one
         self.assertEqual(s["fallback"]["filepath"], "/x/turn_####.png")
         self.assertEqual(s["fallback"]["image_settings"]["color_mode"], "RGBA")
@@ -2111,6 +2113,7 @@ class TestRenderOutput(unittest.TestCase):
     def test_opaque_mp4_keeps_h264(self):
         s = self.ro.output_settings("turntable", "/x/turn.mp4")
         self.assertEqual(s["ffmpeg"], {"format": "MPEG4", "codec": "H264"})
+        self.assertEqual(s["ffmpeg_alternatives"], [])
         self.assertNotIn("color_mode", s["image_settings"])
 
     def test_png_sequence_is_handed_to_ffmpeg_skill_sequence(self):
@@ -2219,8 +2222,13 @@ class TestTransparentRender(unittest.TestCase):
         if data["kind"] != "video":
             self.skipTest(f"this Blender build has no FFmpeg output: {data.get('warning')}")
         self.assertTrue(data["alpha"]["verified"], data["alpha"])
-        self.assertEqual(data["alpha"]["codec"], "prores")
-        self.assertTrue(data["alpha"]["pix_fmt"].startswith("yuva"), data["alpha"])
+        if data["codec"] == "PRORES":
+            self.assertEqual(data["alpha"]["codec"], "prores")
+            self.assertTrue(data["alpha"]["pix_fmt"].startswith("yuva"), data["alpha"])
+        else:
+            # Blender 4.2 LTS has no ProRes encoder: QuickTime Animation, with a warning
+            self.assertEqual((data["codec"], data["alpha"]["codec"]), ("QTRLE", "qtrle"))
+            self.assertIn("no PRORES encoder", data["warning"])
         # decode the first frame back to an RGBA PNG and check the alpha itself, not just the format
         frame = self.out / "mov_frame.png"
         subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(mov), "-frames:v", "1", "-pix_fmt", "rgba",

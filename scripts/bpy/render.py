@@ -98,19 +98,29 @@ def _apply_still(args, scene):
 
 def _apply_video(scene, settings):
     """FFmpeg container/codec, then color_mode (RGBA is only offered once the codec carries
-    alpha). Raises if the requested alpha mode is refused, rather than writing an opaque file."""
+    alpha). A codec this build lacks moves to the next of `ffmpeg_alternatives` (ProRes ->
+    QTRLE on 4.2 LTS); returns the warning saying so, or None. Raises if nothing is accepted,
+    rather than writing an opaque file."""
     ff = scene.render.ffmpeg
-    for key, value in settings["ffmpeg"].items():
-        if key == "ffmpeg_prores_profile" and not hasattr(ff, key):
-            continue  # older builds: ProRes is 4444 by itself when the color mode is RGBA
-        setattr(ff, key, value)
-    color_mode = settings["image_settings"].get("color_mode")
-    if color_mode:
+    choices = [settings["ffmpeg"]] + list(settings.get("ffmpeg_alternatives") or [])
+    errors = []
+    for choice in choices:
         try:
-            scene.render.image_settings.color_mode = color_mode
+            for key, value in choice.items():
+                if key == "ffmpeg_prores_profile" and not hasattr(ff, key):
+                    continue  # builds without the profile choice: ProRes + RGBA is 4444 by itself
+                setattr(ff, key, value)
+            color_mode = settings["image_settings"].get("color_mode")
+            if color_mode:
+                scene.render.image_settings.color_mode = color_mode
         except TypeError as exc:
-            raise RuntimeError(f"this Blender build refuses color_mode {color_mode} for "
-                               f"{settings['ffmpeg'].get('codec')}: {exc}") from exc
+            errors.append(f"{choice.get('codec')}: {exc}")
+            continue
+        if choice is settings["ffmpeg"]:
+            return None
+        return (f"this Blender build has no {settings['ffmpeg']['codec']} encoder; wrote "
+                f"{choice['codec']} in {choice['format']} instead (alpha kept)")
+    raise RuntimeError("this Blender build accepts none of the alpha-capable video codecs: " + "; ".join(errors))
 
 
 def _mode_thumbnail(args, scene):
@@ -163,13 +173,15 @@ def _mode_turntable(args, scene):
             settings = {**settings, "kind": "image_sequence", **fallback}
             _apply_image_settings(scene, settings["image_settings"])
         else:
-            _apply_video(scene, settings)
+            warning = _apply_video(scene, settings)
     else:
         _apply_image_settings(scene, settings["image_settings"])
     scene.render.filepath = settings["filepath"]
     bpy.ops.render.render(animation=True)
     result = {"kind": settings["kind"], "frames": frames, "output_path": settings["filepath"],
               "color_mode": scene.render.image_settings.color_mode}
+    if settings["kind"] == "video":
+        result["codec"] = scene.render.ffmpeg.codec
     if settings["kind"] == "image_sequence":
         result["sequence"] = settings["sequence"]
     if warning:
