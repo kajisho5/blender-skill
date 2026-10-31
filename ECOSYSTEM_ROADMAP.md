@@ -29,7 +29,7 @@ Not reachable from the agent. Turntable MP4 is encoded by Blender's own FFmpeg, 
   - Done when: alpha verified on an output frame
 - [x] **4. Video resolution presets (RM-058)** — 1080p / 4K / vertical — [#172](https://github.com/kajisho5/blender-skill/pull/172)
   - Done when: test per preset
-- [ ] **5. (agent side) SkillSpec render_3d** — CONFIRM; output becomes a B-roll asset for ffmpeg-skill/overlay
+- [x] **5. (agent side) SkillSpec render_3d** — CONFIRM; output becomes a B-roll asset for ffmpeg-skill/overlay — [video-production-agent#95](https://github.com/kajisho5/video-production-agent/pull/95) (ADR-080: `render_3d` → `blender-skill/render` from the pinned contract, a CONFIRM handoff; bringing the render back as an overlay asset is a separate agent step)
   - Done when: tracked in video-production-agent
 
 ---
