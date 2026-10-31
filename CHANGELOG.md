@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.32.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.31.0...blender-skill-v0.32.0) (2026-10-31)
+
+
+### Features
+
+* contract --json and doctor --json in the OS registry shape ([#170](https://github.com/kajisho5/blender-skill/issues/170)) ([fca2db5](https://github.com/kajisho5/blender-skill/commit/fca2db5aeed190652f179c3799e13bd05a0cc70d))
+* **optimize:** RM-045 automatic staged optimization until within budget ([#166](https://github.com/kajisho5/blender-skill/issues/166)) ([39547d9](https://github.com/kajisho5/blender-skill/commit/39547d9e118451891c3ff68e087e20c5bde1599c))
+* render.py --resolution-preset (1080p / 4K / vertical) (RM-058) ([#172](https://github.com/kajisho5/blender-skill/issues/172)) ([af66b39](https://github.com/kajisho5/blender-skill/commit/af66b39d2ff9f995efd240fc4c49c28b2aed4825))
+* render.py --transparent (RGBA PNG / ProRes 4444) and MCP serverInfo.version from _version.py ([#171](https://github.com/kajisho5/blender-skill/issues/171)) ([6e34b06](https://github.com/kajisho5/blender-skill/commit/6e34b0614125f1edfb44a3db62a27dfa4f0b4d9f))
+
+
+### Documentation
+
+* add app icon and wordmark (made with fresnel) ([#169](https://github.com/kajisho5/blender-skill/issues/169)) ([0a9aa7d](https://github.com/kajisho5/blender-skill/commit/0a9aa7d2ff8909c3936df7c5e1456b446a675e59))
+* tick roadmap step 5 (agent side render_3d, video-production-agent[#95](https://github.com/kajisho5/blender-skill/issues/95)) ([#174](https://github.com/kajisho5/blender-skill/issues/174)) ([dcafe81](https://github.com/kajisho5/blender-skill/commit/dcafe818bf70dbc52b2a8ab7ec9d193c5fbfe1d8))
+
 ## [0.31.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.30.0...blender-skill-v0.31.0) (2026-09-19)
 
 
