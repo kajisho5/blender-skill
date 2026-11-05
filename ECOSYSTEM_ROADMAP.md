@@ -17,7 +17,7 @@ v0.31.0. info, convert, optimize, lod, split, anim, bake, scene, render (thumbna
 
 ## Wiring
 
-Not reachable from the agent. Turntable MP4 is encoded by Blender's own FFmpeg, not ffmpeg-skill.
+The agent names `blender-skill/render` in a CONFIRM handoff from a pinned contract (step 5, video-production-agent#95); it does not run it or import the output yet. Turntable MP4 is encoded by Blender's own FFmpeg, not ffmpeg-skill.
 
 ## Steps
 
@@ -33,4 +33,4 @@ Not reachable from the agent. Turntable MP4 is encoded by Blender's own FFmpeg, 
   - Done when: tracked in video-production-agent
 
 ---
-Engine for every media operation: [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) (42 tools, treated as complete). Orchestrator: [video-production-agent](https://github.com/kajisho5/video-production-agent).
+Engine for every media operation: [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) (3.x, 42 tools, contract_version 2.0; treated as complete, proposals go to Velisa's ROADMAP). Orchestrator: [video-production-agent](https://github.com/kajisho5/video-production-agent).
