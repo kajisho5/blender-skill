@@ -38,10 +38,10 @@ The agent names `blender-skill/render` in a CONFIRM handoff from a pinned contra
   - なぜ要るか：企業ロゴ出しや 3D タイポを、外部の 3D ソフトなしで作れる
   - Done when: a fixture renders a Japanese 3D title with the given font (glyphs checked on a frame), alpha around it
 - [ ] **8. Alpha mode and render passes** — transparent output with `alpha: straight|premultiplied` stated in the result, and separate passes (beauty, shadow, AO, mist, object index) as multilayer EXR or PNG sequences for compositing
-  - なぜ要るか：After Effects・NLE・スイッチャーで、影や縁を汚さずに合成できる
+  - なぜ要るか：After Effects や NLE で、影や縁を汚さずに合成できる
   - Done when: an EXR fixture lists the passes; a straight and a premultiplied render of one frame differ only where alpha is below 1
 - [ ] **9. Audio-driven animation** — a beat grid (ffmpeg-skill `scenes --beats`) or a loudness envelope baked into keyframes of a preset's parameters (scale, emission, rotation), so a 3D scene reacts to the music
-  - なぜ要るか：音楽に反応する 3D ビジュアライザーや待機画面を作れる
+  - なぜ要るか：音楽に反応する 3D ビジュアライザーやループ素材を作れる
   - Done when: on a 120 BPM fixture the driven parameter peaks within one frame of every beat
 
 ---
