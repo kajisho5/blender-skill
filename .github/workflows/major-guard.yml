@@ -11,6 +11,12 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
+concurrency:
+  # opened/synchronize and each label change start a run for the same commit (dependabot adds its labels right after
+  # opening, which gave three runs at once); only the newest one, which sees the final labels, needs to finish
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: read

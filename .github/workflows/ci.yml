@@ -18,8 +18,10 @@ on:
     branches: [main]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # a newer commit on a pull request cancels the runs of the commit it replaces; every other run (main, schedule,
+  # manual) has its own group and is never cancelled
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   BLENDER_LTS_1: "4.2.23"
