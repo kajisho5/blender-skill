@@ -13,8 +13,10 @@ on:
 # See ci.yml's identical block for why: a superseded run's result is thrown away anyway, so
 # cancelling it saves real Actions minutes rather than just finishing a run nobody will read.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # a newer commit on a pull request cancels the runs of the commit it replaces; every other run (main, schedule,
+  # manual) has its own group and is never cancelled
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

@@ -11,6 +11,12 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  # a newer commit on a pull request cancels the runs of the commit it replaces; every other run (main, schedule,
+  # manual) has its own group and is never cancelled
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
