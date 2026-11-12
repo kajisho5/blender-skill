@@ -13,7 +13,7 @@ v0.31.0. info, convert, optimize, lod, split, anim, bake, scene, render (thumbna
 
 | Owned job | Status | Note |
 |---|---|---|
-| 3D素材・3Dレンダリング | done |  |
+| 3D素材・3Dレンダリング | done | 3D only, confirmed by the [Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/pull/156) (O17): kinetic typography and geometric motion are hyperframes-skill's, the audio visualizer is remotion-ffmpeg-skill's |
 
 ## Wiring
 
@@ -31,18 +31,25 @@ The agent names `blender-skill/render` in a CONFIRM handoff from a pinned contra
   - Done when: test per preset
 - [x] **5. (agent side) SkillSpec render_3d** — CONFIRM; output becomes a B-roll asset for ffmpeg-skill/overlay — [video-production-agent#95](https://github.com/kajisho5/video-production-agent/pull/95) (ADR-080: `render_3d` → `blender-skill/render` from the pinned contract, a CONFIRM handoff; bringing the render back as an overlay asset is a separate agent step)
   - Done when: tracked in video-production-agent
-- [ ] **6. Procedural motion scenes (Geometry Nodes presets)** — `scene.json` gains a typed `procedural` block naming one of the node-group presets this skill ships as its own .blend data (grid, lines, morphing shapes, instanced particles, extruded patterns) with seed, count, speed and palette; keyframes can lock to a BPM or a beat grid. Same seed, same frames. Field review 2026-11-05 (Velisa ROADMAP, third round)
+- [ ] **6. Procedural motion scenes (Geometry Nodes presets)** — *deferred* — `scene.json` gains a typed `procedural` block naming one of the node-group presets this skill ships as its own .blend data (grid, lines, morphing shapes, instanced particles, extruded patterns) with seed, count, speed and palette; keyframes can lock to a BPM or a beat grid. Same seed, same frames. Field review 2026-11-05 (Velisa ROADMAP, third round)
   - なぜ要るか：幾何学模様の背景や企業イベントのオープニングを、3D の奥行きつきで再現性よく作れる
   - Done when: each preset renders a 2 s sequence twice with the same pixel hash on one machine; an unknown preset parameter is refused
-- [ ] **7. 3D text and logo reveal** — extruded text from a local font file and a logo from an SVG, with bevel, material colours from a brand kit and a reveal animation (rotate-in, build-up, light sweep), rendered transparent
+  - Deferred by the [Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/pull/156) (O17): geometric motion and pattern backgrounds are hyperframes-skill's `キネティックタイポ・幾何学モーション` (its steps 9 and 10, shapes, patterns and the Three.js generative layer). Not started here; reopened only for a need that requires real 3D (lit geometry, depth, camera moves through a scene) that hyperframes-skill cannot meet, recorded first as a Velisa decision
+- [ ] **7. 3D text and logo reveal** — *deferred* — extruded text from a local font file and a logo from an SVG, with bevel, material colours from a brand kit and a reveal animation (rotate-in, build-up, light sweep), rendered transparent
   - なぜ要るか：企業ロゴ出しや 3D タイポを、外部の 3D ソフトなしで作れる
   - Done when: a fixture renders a Japanese 3D title with the given font (glyphs checked on a frame), alpha around it
+  - Deferred by the [Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/pull/156) (O17): animated type, including 3D type from a font file, is hyperframes-skill's kinetic typography (its steps 7 and 10); a title or logo reveal as title material is hyperframes-skill's too (O4, O9). Not started here; reopened only for 3D that hyperframes-skill cannot draw (bevelled, lit, material-shaded type in a 3D scene), recorded first as a Velisa decision
 - [ ] **8. Alpha mode and render passes** — transparent output with `alpha: straight|premultiplied` stated in the result, and separate passes (beauty, shadow, AO, mist, object index) as multilayer EXR or PNG sequences for compositing
   - なぜ要るか：After Effects や NLE で、影や縁を汚さずに合成できる
   - Done when: an EXR fixture lists the passes; a straight and a premultiplied render of one frame differ only where alpha is below 1
-- [ ] **9. Audio-driven animation** — a beat grid (ffmpeg-skill `scenes --beats`) or a loudness envelope baked into keyframes of a preset's parameters (scale, emission, rotation), so a 3D scene reacts to the music
+- [ ] **9. Audio-driven animation** — *deferred* — a beat grid (ffmpeg-skill `scenes --beats`) or a loudness envelope baked into keyframes of a preset's parameters (scale, emission, rotation), so a 3D scene reacts to the music
   - なぜ要るか：音楽に反応する 3D ビジュアライザーやループ素材を作れる
   - Done when: on a 120 BPM fixture the driven parameter peaks within one frame of every beat
+  - Deferred by the [Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/pull/156) (O17): the audio visualizer and beat-measured motion are remotion-ffmpeg-skill's `オーディオビジュアライザー` (its step 8). Not started here
+
+## Boundaries
+
+Under the [Velisa ownership decisions 2026-11-12](https://github.com/kajisho5/Velisa/pull/156) (O17) this skill stays 3D only: 3D assets, scenes, renders and passes (steps 1-5 and 8). Kinetic typography and geometric motion are hyperframes-skill's, the audio visualizer is remotion-ffmpeg-skill's, so steps 6, 7 and 9 are deferred to those two rather than built a second time here.
 
 ---
 Engine for every media operation: [ffmpeg-skill](https://github.com/kajisho5/ffmpeg-skill) (3.x, 42 tools, contract_version 2.0; treated as complete, proposals go to Velisa's ROADMAP). Orchestrator: [video-production-agent](https://github.com/kajisho5/video-production-agent).
