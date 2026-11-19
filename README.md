@@ -338,7 +338,11 @@ budgets), and a live Blender connection for anything that needs a human's eye on
 `python3 scripts/_contract.py --json` prints the machine-readable contract (skill_id, version,
 provides[] in the AI Video Production OS registry shape, one entry per script above), and
 `python3 scripts/_contract.py doctor --json` reports whether Blender (4.2+), gltf-transform and
-ktx are found.
+ktx are found. `contract/contract.json` is the same contract committed as a file (the `--json`
+output as one line with sorted keys, compact separators and a final newline), so any release's
+contract is `git show blender-skill-vX.Y.Z:contract/contract.json`, with nothing installed or run.
+Regenerate it with `python3 contract/generate.py`; a test fails when it is stale, and release-please
+moves its `version` with the other version files.
 
 See `references/pitfalls.md` for the real gotchas found building this (GPU-offscreen limits
 under `-b`, an Eevee engine-name rename between Blender versions, format round-trip quirks) and
