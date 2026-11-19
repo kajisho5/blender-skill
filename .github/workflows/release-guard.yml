@@ -1,0 +1,21 @@
+name: Release guard
+
+# Trial of Velisa's reusable release-guard.yml (Velisa ADR-022, decision D36): the newest release
+# tag's contract/contract.json must say the tag's version. It releases nothing.
+
+# release-please makes the tag with GITHUB_TOKEN, which starts no workflow, so this runs when
+# release-please has finished.
+on:
+  workflow_run:
+    workflows: ["release-please"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-guard:
+    uses: kajisho5/Velisa/.github/workflows/release-guard.yml@main
+    with:
+      tag-pattern: "^blender-skill-v(?P<version>\\d+\\.\\d+\\.\\d+)$"
