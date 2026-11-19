@@ -2015,6 +2015,12 @@ class TestContract(unittest.TestCase):
         if not _blender_available():
             self.assertEqual(d["checks"]["blender"]["status"], "fail")
 
+    def test_committed_contract_file_is_up_to_date(self):
+        # contract/contract.json is the contract as a committed file, read at a tag without running code
+        proc = subprocess.run([sys.executable, str(ROOT / "contract" / "generate.py"), "--check"],
+                              capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
 
 
 class TestMcpServer(unittest.TestCase):
