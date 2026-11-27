@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _common
 import _compat
+import _passes
 
 import bpy
 import mathutils
@@ -81,11 +82,17 @@ def _apply_image_settings(scene, image_settings):
     target = scene.render.image_settings
     if hasattr(target, "media_type"):
         # Blender 5.0+ splits image vs. video output: FFMPEG is only a valid file_format once
-        # media_type is VIDEO (and PNG only once it is IMAGE again, after a failed video try).
-        target.media_type = "VIDEO" if fmt == "FFMPEG" else "IMAGE"
+        # media_type is VIDEO (and PNG only once it is IMAGE again, after a failed video try);
+        # a multilayer EXR is its own MULTI_LAYER_IMAGE media type.
+        if fmt == "FFMPEG":
+            target.media_type = "VIDEO"
+        elif fmt == "OPEN_EXR_MULTILAYER":
+            target.media_type = "MULTI_LAYER_IMAGE"
+        else:
+            target.media_type = "IMAGE"
     target.file_format = fmt
     if fmt != "FFMPEG":
-        for key in ("color_mode", "color_depth"):
+        for key in ("color_mode", "color_depth", "exr_codec"):
             if key in image_settings:
                 setattr(target, key, image_settings[key])
 
@@ -128,8 +135,13 @@ def _mode_thumbnail(args, scene):
     if not scene.camera:
         _add_camera(center, size)
     _add_lighting(args.get("light", "outdoor"))
+    settings = args["output_settings"]
+    if settings.get("frame_plan"):
+        scene.render.film_transparent = settings["film_transparent"]
+        extra = _passes.render_plan(scene, settings["frame_plan"], _apply_image_settings, center, size)
+        return {"kind": "still", **extra}
     _apply_still(args, scene)
-    scene.render.filepath = args["output_settings"]["filepath"]
+    scene.render.filepath = settings["filepath"]
     bpy.ops.render.render(write_still=True)
     return {"kind": "still"}
 
@@ -155,6 +167,10 @@ def _mode_turntable(args, scene):
 
     settings = args["output_settings"]
     scene.render.film_transparent = settings["film_transparent"]
+    if settings.get("frame_plan"):
+        extra = _passes.render_plan(scene, settings["frame_plan"], _apply_image_settings, center, size)
+        return {"kind": "image_sequence", "frames": frames, "output_path": settings["filepath"],
+                "color_mode": scene.render.image_settings.color_mode, "sequence": settings["sequence"], **extra}
     warning = None
     if settings["kind"] == "video":
         # bl_rna's static enum_items always lists 'FFMPEG' as a structurally possible value for
