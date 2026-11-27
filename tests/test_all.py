@@ -2331,6 +2331,9 @@ class TestAlphaModeAndPasses(unittest.TestCase):
         self._refused("turntable", "/x/a.mov", passes="ao")
         self._refused("sheet", "/x/a.png", passes="ao")
         self._refused("sheet", "/x/a.exr")
+        self._refused("sheet", "/x/a.png", passes="beauty")
+        self._refused("turntable", "/x/a.mov", passes="beauty")
+        self._refused("sheet", "/x/a.png", transparent=True, alpha_mode="premultiplied")
         self.assertEqual(self.ro.parse_passes("Mist, beauty,ao"), ["ao", "mist"])  # PASSES order, beauty implied
 
     def test_exr_plan_and_png_plan(self):
@@ -2344,6 +2347,8 @@ class TestAlphaModeAndPasses(unittest.TestCase):
         plan = s["frame_plan"]
         self.assertEqual(plan["pass_pngs"], {"ao": "/x/turn_%04d.ao.png"})
         self.assertEqual((plan["exr"]["keep"], plan["exr"]["image_settings"]["exr_codec"]), (False, "NONE"))
+        # the intermediate is a hidden name of this run's own, never `<beauty>.passes.exr`
+        self.assertRegex(plan["exr"]["path"], r"^/x/\.turn_%04d\.passes-[0-9a-f]{12}\.exr$")
         self.assertEqual(s["pass_sequences"]["ao"]["pattern"], "turn_%04d.ao.png")
         s = self.ro.output_settings("thumbnail", "/x/still.png", passes="mist")
         self.assertEqual(s["frame_plan"]["pass_pngs"], {"mist": "/x/still.mist.png"})
@@ -2390,9 +2395,10 @@ class TestAlphaModeAndPasses(unittest.TestCase):
         self.assertIn("--resolution-preset", options)  # unchanged, still there
 
     def test_render_dry_run_refuses_with_a_json_error(self):
-        proc = run("render.py", str(FIXTURE), "--passes", "object_index", "-o", "/tmp/never.exr", "--dry-run", "--json")
-        self.assertEqual(proc.returncode, 1)
-        self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+        for extra in (["--passes", "object_index"], ["--transparent", "--alpha-mode", "associated"]):
+            proc = run("render.py", str(FIXTURE), *extra, "-o", "/tmp/never.exr", "--dry-run", "--json")
+            self.assertEqual(proc.returncode, 1, extra)
+            self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
 
 
 @unittest.skipUnless(_blender_available(), "no Blender found (see scripts/_run.py's search order)")
@@ -2451,7 +2457,8 @@ class TestRenderPasses(unittest.TestCase):
             header = self.ro.png_header(str(self.out / f"still.{name}.png"))
             self.assertEqual((header["width"], header["height"], header["bit_depth"], header["channels"]),
                              (48, 48, 16, channels), name)
-        self.assertFalse((self.out / "still.passes.exr").exists())  # the intermediate is removed
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
+                         ["still.ao.png", "still.mist.png", "still.object_index.png", "still.png"])  # intermediate removed
 
     def test_straight_and_premultiplied_differ_only_where_alpha_is_below_1(self):
         straight, premul = self.out / "straight.png", self.out / "premul.png"

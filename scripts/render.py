@@ -63,7 +63,7 @@ def main() -> int:
     ap.add_argument("--samples", type=int, help="override the sample count (default 64, or 16 with --fast)")
     ap.add_argument("--transparent", action="store_true",
                     help="render with alpha: RGBA PNG (still or sequence) or ProRes 4444 .mov; refuses .mp4")
-    ap.add_argument("--alpha-mode", choices=list(_render_output.ALPHA_MODES),
+    ap.add_argument("--alpha-mode", metavar="|".join(_render_output.ALPHA_MODES),
                     help="how the alpha result stores its colour (default: the format's own -- straight for PNG/.mov, "
                          "premultiplied for .exr); needs --transparent or an .exr output")
     ap.add_argument("--passes", metavar="LIST",

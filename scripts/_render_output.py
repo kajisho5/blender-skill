@@ -36,6 +36,7 @@ import re
 import shutil
 import struct
 import subprocess
+import uuid
 import zlib
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
@@ -183,11 +184,15 @@ def output_settings(mode: str, output: str, *, transparent: bool = False, fps: i
     write, passes on a sheet or a video, and an alpha mode the output cannot be written in."""
     ext = Path(output).suffix.lower()
     wanted = parse_passes(passes)
+    asked = passes is not None  # an explicit `--passes beauty` counts as a pass request too
     if alpha_mode is not None and alpha_mode not in ALPHA_MODES:
         raise SkillError(f"unknown alpha mode: {alpha_mode!r}", kind="input", hint="valid: " + ", ".join(ALPHA_MODES))
-    if (wanted or ext == ".exr") and mode == "sheet":
+    if (asked or ext == ".exr") and mode == "sheet":
         raise SkillError("--passes and .exr output are for a thumbnail or a turntable, not a --sheet", kind="input")
-    if wanted and ext not in (".exr", ".png"):
+    if mode == "sheet" and alpha_mode == "premultiplied":
+        raise SkillError("a --sheet is written with straight alpha only", kind="input",
+                         hint="render a premultiplied thumbnail, or premultiply the sheet afterwards")
+    if asked and ext not in (".exr", ".png"):
         raise SkillError(f"--passes needs an .exr (multilayer) or .png (one file per pass) output (got {ext or 'no extension'})",
                          kind="input", hint="use -o NAME.exr, or -o NAME.png / 'NAME_####.png' for a turntable")
     unsupported = [n for n in wanted if engine not in PASSES[n]["engines"]]
@@ -245,7 +250,10 @@ def _frame_plan(mode, settings, container, wanted, premultiply, fps, frames) -> 
         plan["pass_pngs"] = {}
     else:
         plan["beauty"] = {"path": fmt(beauty), "image_settings": dict(settings["image_settings"])}
-        tmp = str(Path(beauty).with_suffix(".passes.exr"))
+        # a name this run owns (hidden, random), so the intermediate it deletes is never a file
+        # that was already there -- e.g. an earlier `-o shot.passes.exr` deliverable
+        stem = Path(beauty)
+        tmp = str(stem.with_name(f".{stem.stem}.passes-{uuid.uuid4().hex[:12]}.exr"))
         plan["exr"] = ({"path": fmt(tmp), "keep": False,
                         "image_settings": {"file_format": "OPEN_EXR_MULTILAYER", "color_depth": "32", "exr_codec": "NONE"}}
                        if wanted else None)

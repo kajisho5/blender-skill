@@ -53,12 +53,14 @@ that changes an earlier one says so instead of editing it.
     the mode on (color-grading-skill refuses a premultiplied source for a grade that keeps the
     alpha, its ADR-33). A straight EXR or a premultiplied `.mov` is refused (`input`) instead of
     converted: either would mean re-encoding Blender's output after the fact, and the other
-    container already holds the mode asked for.
+    container already holds the mode asked for. A premultiplied `--sheet` is refused too (the
+    sheet is composed from its tiles after the render and is written straight).
   - *Passes.* `--passes` takes `beauty`, `shadow`, `ao`, `mist`, `object_index` (beauty is
     always written). `-o NAME.exr` writes one multilayer EXR per frame (a still, or
     `NAME_####.exr` for a turntable); `-o NAME.png` writes the beauty PNG plus `NAME.<pass>.png`
     per pass per frame, cut from an uncompressed float EXR of the same render that is then
-    deleted. PNG passes are data, not pictures: linear, 16-bit, no view transform; object_index
+    deleted; that intermediate has a hidden name of the run's own
+    (`.NAME.passes-<random>.exr`), so the file it deletes is never one that was already there. PNG passes are data, not pictures: linear, 16-bit, no view transform; object_index
     is the index itself (0 = background), and when no mesh has a pass index each gets 1, 2, ...
     in name order (`object_index_map` in the result). Mist runs linearly from just in front of
     the model to just behind it, not Blender's fixed 5 m start. A sheet and a video take no
