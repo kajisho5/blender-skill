@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.31.1...blender-skill-v0.32.0) (2026-11-27)
+
+
+### Features
+
+* **render:** state the alpha mode and write render passes (EXR / per-pass PNG) ([#185](https://github.com/kajisho5/blender-skill/issues/185)) ([81bbd5d](https://github.com/kajisho5/blender-skill/commit/81bbd5d4a6e9c86c38e6692810e828e27361a433))
+
 ## [0.31.1](https://github.com/kajisho5/blender-skill/compare/blender-skill-v0.31.0...blender-skill-v0.31.1) (2026-11-19)
 
 
