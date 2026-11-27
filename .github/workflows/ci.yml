@@ -216,4 +216,12 @@ jobs:
           BLENDER: ${{ github.workspace }}/blender-install/blender
         run: python3 tests/test_all.py TestResolutionPresetRender -v
 
+      # --alpha-mode / --passes against this real Blender (docs/decisions.md ADR-2): the passes
+      # listed back from the written EXR header and per-pass PNGs, and a straight vs a
+      # premultiplied render of one frame compared pixel by pixel.
+      - name: render.py --passes (multilayer EXR, per-pass PNG) and --alpha-mode compared on a frame
+        env:
+          BLENDER: ${{ github.workspace }}/blender-install/blender
+        run: python3 tests/test_all.py TestRenderPasses -v
+
       - run: python3 tests/test_all.py

@@ -25,6 +25,23 @@ raises `bpy_struct: item.attr = val: enum "..." not found in (...)`. Use
 `bpy.types.RenderSettings.bl_rna.properties["engine"].enum_items` at runtime instead of
 hardcoding either string.
 
+## A multilayer EXR is laid out differently on Blender 5.x
+
+Blender 4.2/4.5 write a multilayer EXR as one part with every pass's channels in it
+(`ViewLayer.AO.R`, `ViewLayer.IndexOB.X`). Blender 5.3.0 writes one EXR *part* per pass (the
+multi-part flag in the version field) and spells two passes out: `ViewLayer.Ambient Occlusion.R`,
+`ViewLayer.Object Index.X`. It also wants `image_settings.media_type = "MULTI_LAYER_IMAGE"`
+before `file_format = "OPEN_EXR_MULTILAYER"`. A reader that stops after the first header sees
+only the beauty. `scripts/_exr.py` reads every part's header and render.py matches both
+spellings (`PASSES[...]["exr_layer"]` in `scripts/_render_output.py`).
+
+## Eevee and Cycles do not write the same passes
+
+`view_layer.use_pass_shadow` and `use_pass_object_index` can both be set to True on either
+engine without an error, but on 4.5.13 Eevee writes no IndexOB layer and Cycles writes no
+Shadow layer (Cycles' shadow catcher is a different pass). render.py refuses the combination up
+front instead of returning a file without the pass.
+
 ## A watertight mesh is NOT what `bmesh` calls manifold, if you check it before welding
 
 glTF/FBX/OBJ all split a vertex per unique normal/UV at a hard edge or UV seam, so a perfectly

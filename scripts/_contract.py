@@ -51,6 +51,26 @@ def tool_options() -> Dict[str, Dict[str, Any]]:
                 "precedence": ["--resolution W H", "--resolution-preset NAME", "default"],
                 "invalid": {"kind": "input", "exit_code": 1},
             },
+            # docs/decisions.md ADR-2; the result's alpha.mode uses the same two words as
+            # color-grading-skill's project.source.alpha_mode.
+            "--alpha-mode": {
+                "choices": list(_render_output.ALPHA_MODES),
+                "default": "the container's own: " + ", ".join(f"{k} {v}" for k, v in _render_output.NATIVE_ALPHA_MODE.items()),
+                "requires": "--transparent, or an .exr output",
+                "result_field": "alpha.mode",
+                "writable": {"png": list(_render_output.ALPHA_MODES), "video": ["straight"], "exr": ["premultiplied"]},
+                "invalid": {"kind": "input", "exit_code": 1},
+            },
+            "--passes": {
+                "choices": list(_render_output.PASSES),
+                "format": "comma-separated",
+                "outputs": {"exr": "one multilayer EXR per frame holding every pass",
+                            "png": "the beauty PNG plus NAME.<pass>.png per pass per frame"},
+                "engines": {k: list(v["engines"]) for k, v in _render_output.PASSES.items()},
+                "png_encoding": {k: v["png"] for k, v in _render_output.PASSES.items()},
+                "result_field": "passes",
+                "invalid": {"kind": "input", "exit_code": 1},
+            },
         },
     }
 

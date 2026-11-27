@@ -2245,6 +2245,246 @@ class TestTransparentRender(unittest.TestCase):
         self.assertEqual(info["max"], 255)
 
 
+def _exr_attr(name, kind, value):
+    return name.encode() + b"\x00" + kind.encode() + b"\x00" + struct.pack("<i", len(value)) + value
+
+
+def _exr_chlist(names, ptype=1):
+    return b"".join(n.encode() + b"\x00" + struct.pack("<iB3xii", ptype, 0, 1, 1) for n in names) + b"\x00"
+
+
+def _write_exr_header(path, parts, width=4, height=2) -> None:
+    """A header-only OpenEXR (no pixel data): one part, or several with the multi-part flag --
+    the two layouts Blender 4.x and 5.x write a multilayer EXR in. Enough for _exr.read_header."""
+    window = struct.pack("<iiii", 0, 0, width - 1, height - 1)
+    multipart = len(parts) > 1
+    body = b""
+    for name, channels in parts:
+        attrs = _exr_attr("channels", "chlist", _exr_chlist(channels)) + _exr_attr("compression", "compression", b"\x03")
+        attrs += _exr_attr("dataWindow", "box2i", window) + _exr_attr("displayWindow", "box2i", window)
+        if multipart:
+            attrs += _exr_attr("name", "string", name.encode()) + _exr_attr("type", "string", b"scanlineimage")
+            attrs += _exr_attr("chunkCount", "int", struct.pack("<i", height))
+        body += attrs + b"\x00"
+    if multipart:
+        body += b"\x00"
+    flags = 2 | (0x1000 if multipart else 0)
+    Path(path).write_bytes(struct.pack("<iI", 20000630, flags) + body)
+
+
+class TestAlphaModeAndPasses(unittest.TestCase):
+    """--alpha-mode / --passes (docs/decisions.md ADR-2) without Blender: the settings and the
+    refusals render.py decides on the host, and the EXR header read-back. The real renders are
+    TestRenderPasses."""
+
+    @classmethod
+    def setUpClass(cls):
+        import _exr
+        import _render_output
+        cls.ro, cls.exr = _render_output, _exr
+
+    def _refused(self, *args, **kwargs):
+        from _common import SkillError
+        with self.assertRaises(SkillError) as ctx:
+            self.ro.output_settings(*args, **kwargs)
+        self.assertEqual(ctx.exception.kind, "input")
+        return ctx.exception
+
+    def test_every_alpha_output_states_its_mode(self):
+        cases = [("thumbnail", "/x/a.png", "straight"), ("turntable", "/x/a.mov", "straight"),
+                 ("turntable", "/x/a_####.png", "straight"), ("thumbnail", "/x/a.exr", "premultiplied")]
+        for mode, out, expected in cases:
+            s = self.ro.output_settings(mode, out, transparent=True)
+            self.assertEqual(s["alpha_mode"]["mode"], expected, out)
+            self.assertEqual(s["alpha_mode"]["source"], "default")
+        # an EXR always carries alpha, so it states the mode even without --transparent
+        self.assertEqual(self.ro.output_settings("thumbnail", "/x/a.exr")["alpha_mode"]["mode"], "premultiplied")
+        self.assertNotIn("alpha_mode", self.ro.output_settings("thumbnail", "/x/a.png"))
+
+    def test_premultiplied_png_is_post_processed(self):
+        s = self.ro.output_settings("thumbnail", "/x/a.png", transparent=True, alpha_mode="premultiplied")
+        self.assertEqual(s["alpha_mode"], {"mode": "premultiplied", "source": "request", "container": "png"})
+        plan = s["frame_plan"]
+        self.assertTrue(plan["premultiply_png"])
+        self.assertEqual(plan["beauty"]["path"], "/x/a.png")
+        self.assertIsNone(plan["exr"])
+        note = self.ro.with_alpha_mode({}, s["alpha_mode"])
+        self.assertEqual((note["mode"], note["mode_source"]), ("premultiplied", "request"))
+        self.assertIn("straight", note["note"])
+        # the straight default needs no frame-by-frame pass
+        self.assertNotIn("frame_plan", self.ro.output_settings("thumbnail", "/x/a.png", transparent=True,
+                                                               alpha_mode="straight"))
+
+    def test_alpha_modes_a_container_cannot_hold_are_refused(self):
+        self.assertIn("premultiplied", self._refused("turntable", "/x/a.mov", transparent=True,
+                                                    alpha_mode="premultiplied").message)
+        self.assertIn("straight", self._refused("thumbnail", "/x/a.exr", alpha_mode="straight").message)
+        self.assertIn("--transparent", self._refused("thumbnail", "/x/a.png", alpha_mode="straight").message)
+        self._refused("thumbnail", "/x/a.png", transparent=True, alpha_mode="associated")
+
+    def test_passes_are_validated_per_engine_and_output(self):
+        self.assertIn("foo", self._refused("thumbnail", "/x/a.exr", passes="ao,foo").message)
+        err = self._refused("thumbnail", "/x/a.exr", passes="object_index")
+        self.assertIn("eevee", err.message)
+        self.assertIn("--cycles", err.hint)
+        self.assertIn("shadow", self._refused("thumbnail", "/x/a.exr", passes="shadow", engine="cycles").message)
+        self._refused("turntable", "/x/a.mov", passes="ao")
+        self._refused("sheet", "/x/a.png", passes="ao")
+        self._refused("sheet", "/x/a.exr")
+        self._refused("sheet", "/x/a.png", passes="beauty")
+        self._refused("turntable", "/x/a.mov", passes="beauty")
+        self._refused("sheet", "/x/a.png", transparent=True, alpha_mode="premultiplied")
+        self.assertEqual(self.ro.parse_passes("Mist, beauty,ao"), ["ao", "mist"])  # PASSES order, beauty implied
+
+    def test_exr_plan_and_png_plan(self):
+        s = self.ro.output_settings("turntable", "/x/turn.exr", passes="shadow,ao", frames=3)
+        self.assertEqual(s["image_settings"]["file_format"], "OPEN_EXR_MULTILAYER")
+        plan = s["frame_plan"]
+        self.assertEqual((plan["frames"], plan["exr"]["path"], plan["exr"]["keep"]), ([1, 2, 3], "/x/turn_%04d.exr", True))
+        self.assertEqual(plan["properties"], {"shadow": "use_pass_shadow", "ao": "use_pass_ambient_occlusion"})
+        self.assertEqual(s["sequence"]["pattern"], "turn_%04d.exr")
+        s = self.ro.output_settings("turntable", "/x/turn_####.png", passes="ao", engine="cycles", frames=2)
+        plan = s["frame_plan"]
+        self.assertEqual(plan["pass_pngs"], {"ao": "/x/turn_%04d.ao.png"})
+        self.assertEqual((plan["exr"]["keep"], plan["exr"]["image_settings"]["exr_codec"]), (False, "NONE"))
+        # the intermediate is a hidden name of this run's own, never `<beauty>.passes.exr`
+        self.assertRegex(plan["exr"]["path"], r"^/x/\.turn_%04d\.passes-[0-9a-f]{12}\.exr$")
+        self.assertEqual(s["pass_sequences"]["ao"]["pattern"], "turn_%04d.ao.png")
+        s = self.ro.output_settings("thumbnail", "/x/still.png", passes="mist")
+        self.assertEqual(s["frame_plan"]["pass_pngs"], {"mist": "/x/still.mist.png"})
+
+    def test_exr_header_lists_layers_single_and_multi_part(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            one = Path(tmp) / "one.exr"
+            _write_exr_header(one, [("", ["ViewLayer.AO.B", "ViewLayer.AO.G", "ViewLayer.AO.R", "ViewLayer.Combined.A",
+                                          "ViewLayer.Combined.B", "ViewLayer.Combined.G", "ViewLayer.Combined.R",
+                                          "ViewLayer.Mist.Z"])])
+            report = self.ro.exr_passes_report(str(one), ["ao", "mist"])
+            self.assertTrue(report["verified"], report)
+            self.assertTrue(report["has_alpha"])
+            self.assertEqual(report["layers"], ["ViewLayer.AO", "ViewLayer.Combined", "ViewLayer.Mist"])
+            self.assertEqual(report["passes"]["ao"], {"layer": "ViewLayer.AO", "channels": ["B", "G", "R"]})
+            self.assertEqual((report["width"], report["height"], report["compression"]), (4, 2, "zip"))
+            missing = self.ro.exr_passes_report(str(one), ["shadow"])
+            self.assertEqual((missing["verified"], missing["missing"]), (False, ["shadow"]))
+            # Blender 5.x: one part per pass and the long pass names
+            multi = Path(tmp) / "multi.exr"
+            _write_exr_header(multi, [("ViewLayer.Combined", ["ViewLayer.Combined.A", "ViewLayer.Combined.B",
+                                                              "ViewLayer.Combined.G", "ViewLayer.Combined.R"]),
+                                      ("ViewLayer.Ambient Occlusion", ["ViewLayer.Ambient Occlusion.B",
+                                                                       "ViewLayer.Ambient Occlusion.G",
+                                                                       "ViewLayer.Ambient Occlusion.R"]),
+                                      ("ViewLayer.Object Index", ["ViewLayer.Object Index.X"])])
+            header = self.exr.read_header(str(multi))
+            self.assertTrue(header["multipart"])
+            self.assertEqual(len(header["parts"]), 3)
+            report = self.ro.exr_passes_report(str(multi), ["ao", "object_index"])
+            self.assertTrue(report["verified"], report)
+            self.assertEqual(report["passes"]["object_index"]["layer"], "ViewLayer.Object Index")
+            with self.assertRaises(ValueError):
+                not_exr = Path(tmp) / "x.exr"
+                not_exr.write_bytes(b"not an exr")
+                self.exr.read_header(str(not_exr))
+
+    def test_contract_lists_the_new_options(self):
+        import _contract
+        options = next(t for t in _contract.build()["tools"] if t["tool_id"] == "blender-skill/render")["options"]
+        self.assertEqual(options["--alpha-mode"]["choices"], ["straight", "premultiplied"])
+        self.assertEqual(options["--passes"]["choices"], ["beauty", "shadow", "ao", "mist", "object_index"])
+        self.assertEqual(options["--passes"]["engines"]["object_index"], ["cycles"])
+        self.assertIn("--resolution-preset", options)  # unchanged, still there
+
+    def test_render_dry_run_refuses_with_a_json_error(self):
+        for extra in (["--passes", "object_index"], ["--transparent", "--alpha-mode", "associated"]):
+            proc = run("render.py", str(FIXTURE), *extra, "-o", "/tmp/never.exr", "--dry-run", "--json")
+            self.assertEqual(proc.returncode, 1, extra)
+            self.assertEqual(json.loads(proc.stdout)["error"]["kind"], "input")
+
+
+@unittest.skipUnless(_blender_available(), "no Blender found (see scripts/_run.py's search order)")
+class TestRenderPasses(unittest.TestCase):
+    """--passes / --alpha-mode against a real Blender (ECOSYSTEM_ROADMAP.md step 8): the passes are
+    read back from the written EXR's own header, and a straight and a premultiplied render of one
+    frame are compared pixel by pixel. CI runs this class in the render job."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = Path(self.tmp.name)
+        import _exr
+        import _render_output
+        self.ro, self.exr = _render_output, _exr
+
+    def _render(self, *argv):
+        proc = run("render.py", str(FIXTURE), *argv, "--fast", "--resolution", "48", "48", "--json")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        return json.loads(proc.stdout)
+
+    def _layers(self, path):
+        return {full.rpartition(".")[2] for full in self.exr.layers(self.exr.read_header(str(path))["channels"])}
+
+    def test_eevee_exr_lists_shadow_ao_mist(self):
+        exr = self.out / "still.exr"
+        data = self._render("--passes", "shadow,ao,mist", "-o", str(exr))
+        layers = self._layers(exr)
+        for names in (("Combined",), ("Shadow",), ("AO", "Ambient Occlusion"), ("Mist",)):
+            self.assertTrue(layers & set(names), (names, layers))
+        self.assertTrue(data["passes"]["verified"], data["passes"])
+        self.assertEqual(data["passes"]["container"], "exr_multilayer")
+        self.assertEqual((data["alpha"]["mode"], data["alpha"]["has_alpha"]), ("premultiplied", True))
+
+    def test_cycles_exr_lists_object_index(self):
+        exr = self.out / "still.exr"
+        data = self._render("--cycles", "--passes", "ao,mist,object_index", "-o", str(exr))
+        self.assertTrue(self._layers(exr) & {"IndexOB", "Object Index"})
+        self.assertTrue(data["passes"]["verified"], data["passes"])
+        self.assertEqual(sorted(data["passes"]["object_index_map"].values()), [1])
+
+    def test_turntable_exr_sequence_has_the_passes_on_every_frame(self):
+        data = self._render("--turntable", "--frames", "2", "--passes", "ao", "-o", str(self.out / "turn.exr"))
+        seq = data["sequence"]
+        for n in (1, 2):
+            frame = Path(seq["dir"]) / (seq["pattern"] % n)
+            self.assertTrue(self._layers(frame) & {"AO", "Ambient Occlusion"}, frame)
+
+    def test_png_passes_one_file_per_pass(self):
+        beauty = self.out / "still.png"
+        data = self._render("--cycles", "--transparent", "--passes", "ao,mist,object_index", "-o", str(beauty))
+        passes = data["passes"]
+        self.assertTrue(passes["verified"], passes)
+        self.assertEqual(passes["container"], "png")
+        for name, channels in (("ao", 3), ("mist", 1), ("object_index", 1)):
+            header = self.ro.png_header(str(self.out / f"still.{name}.png"))
+            self.assertEqual((header["width"], header["height"], header["bit_depth"], header["channels"]),
+                             (48, 48, 16, channels), name)
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
+                         ["still.ao.png", "still.mist.png", "still.object_index.png", "still.png"])  # intermediate removed
+
+    def test_straight_and_premultiplied_differ_only_where_alpha_is_below_1(self):
+        straight, premul = self.out / "straight.png", self.out / "premul.png"
+        a = self._render("--transparent", "--alpha-mode", "straight", "-o", str(straight))
+        b = self._render("--transparent", "--alpha-mode", "premultiplied", "-o", str(premul))
+        self.assertEqual((a["alpha"]["mode"], b["alpha"]["mode"]), ("straight", "premultiplied"))
+        w1, h1, c1, rows_s = self.ro.decode_png(str(straight))
+        w2, h2, c2, rows_p = self.ro.decode_png(str(premul))
+        self.assertEqual((w1, h1, c1), (w2, h2, c2))
+        self.assertEqual(c1, 4)
+        differing = partial = 0
+        for rs, rp in zip(rows_s, rows_p):
+            for x in range(w1):
+                ps, pp = rs[4 * x:4 * x + 4], rp[4 * x:4 * x + 4]
+                alpha = ps[3]
+                self.assertEqual(alpha, pp[3])  # the alpha itself is the same render
+                if alpha == 255:
+                    self.assertEqual(ps, pp)  # opaque: identical
+                else:
+                    self.assertEqual(list(pp[:3]), [(c * alpha + 127) // 255 for c in ps[:3]])
+                    differing += ps != pp
+                    partial += 0 < alpha
+        self.assertGreater(partial, 0)    # the box's anti-aliased edge has alpha in (0, 255)
+        self.assertGreater(differing, 0)  # ... and that is where the two files differ
+
+
 class TestResolutionPresets(unittest.TestCase):
     """render.py --resolution-preset (RM-058, docs/decisions.md ADR-1) -- no Blender needed: the
     size resolution, the --dry-run args handed to Blender, the structured error for an unknown

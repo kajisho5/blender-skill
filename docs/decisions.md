@@ -32,3 +32,47 @@ that changes an earlier one says so instead of editing it.
     validation, its `--help`, the MCP `render` tool description, and the contract's
     `tools[].options["--resolution-preset"]` (choices, sizes, default, precedence, error kind), so
     no listing can offer a name the CLI refuses.
+
+- **ADR-2 Alpha mode and render passes (ECOSYSTEM_ROADMAP.md step 8): every alpha result states
+  `alpha.mode`, `straight` or `premultiplied`; `--passes` writes shadow / ao / mist /
+  object_index as a multilayer EXR or as one PNG per pass.**
+  - *The words.* `alpha.mode` takes the same two values as color-grading-skill's
+    `project.source.alpha_mode` (its ADR-33) and the agent's `source_alpha_mode` (its ADR-131),
+    so a render can be handed on without translating. color-grading-skill cannot tell the mode
+    of a ProRes 4444 or QTRLE file from the stream and assumes straight with a warning; this
+    skill wrote the file, so it says which (`mode_source`: `request` or `default`).
+  - *What Blender writes, measured, not assumed.* A PNG is straight (its specification, and
+    Blender un-premultiplies on save). A ProRes 4444 `.mov` is straight too: on 4.5.13 a frame
+    decoded back matches the PNG of the same render within 4 levels where alpha is below 255,
+    where a premultiplied file would be several times darker. A multilayer EXR is premultiplied
+    (OpenEXR convention, Blender's render buffer as is).
+  - *`--alpha-mode`.* Needs `--transparent` or an `.exr` output (an EXR always carries alpha).
+    PNG takes both: `premultiplied` re-writes each written PNG with `round(c * a / 255)`, so a
+    pixel with alpha 255 is unchanged and only pixels with alpha below 255 differ. The alpha
+    block then carries a `note`: a PNG cannot say it is premultiplied, so the caller has to pass
+    the mode on (color-grading-skill refuses a premultiplied source for a grade that keeps the
+    alpha, its ADR-33). A straight EXR or a premultiplied `.mov` is refused (`input`) instead of
+    converted: either would mean re-encoding Blender's output after the fact, and the other
+    container already holds the mode asked for. A premultiplied `--sheet` is refused too (the
+    sheet is composed from its tiles after the render and is written straight).
+  - *Passes.* `--passes` takes `beauty`, `shadow`, `ao`, `mist`, `object_index` (beauty is
+    always written). `-o NAME.exr` writes one multilayer EXR per frame (a still, or
+    `NAME_####.exr` for a turntable); `-o NAME.png` writes the beauty PNG plus `NAME.<pass>.png`
+    per pass per frame, cut from an uncompressed float EXR of the same render that is then
+    deleted; that intermediate has a hidden name of the run's own
+    (`.NAME.passes-<random>.exr`), so the file it deletes is never one that was already there. PNG passes are data, not pictures: linear, 16-bit, no view transform; object_index
+    is the index itself (0 = background), and when no mesh has a pass index each gets 1, 2, ...
+    in name order (`object_index_map` in the result). Mist runs linearly from just in front of
+    the model to just behind it, not Blender's fixed 5 m start. A sheet and a video take no
+    passes (`input`).
+  - *Per engine.* Checked on 4.5.13: Eevee writes Shadow but no object index; Cycles writes
+    the object index but no Shadow (its shadow catcher is a different pass). A pass the chosen
+    engine does not write is refused with the engine that does, rather than silently missing.
+  - *Read back.* The `passes` block is read from the written files: the EXR header's channel
+    list (stdlib `scripts/_exr.py`, every compression, single-part as 4.x writes it and
+    multi-part as 5.x writes it, with 5.x's spelled-out `Ambient Occlusion` / `Object Index`
+    layer names), or each pass PNG's header (size, bit depth, channels). `verified` is false
+    with `missing` when a pass is not there.
+  - *Contract.* Additive: two new `render` options in `tools[].options` (`--alpha-mode`,
+    `--passes`), new result fields `alpha.mode`, `alpha.mode_source` and `passes`. Nothing
+    existing changed.

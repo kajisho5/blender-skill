@@ -18,6 +18,20 @@ Usage:
 4444 .mov. A format without alpha (.mp4/H.264, .jpg) is refused. The result's "alpha" block is
 read back from the written output; a PNG sequence also carries a "sequence" block shaped for
 ffmpeg-skill's sequence.py (--dir/--pattern/--fps/--start-number).
+
+Alpha mode and render passes (docs/decisions.md ADR-2):
+  python3 scripts/render.py model.glb --transparent --alpha-mode premultiplied -o thumb.png
+  python3 scripts/render.py model.glb --passes shadow,ao,mist -o thumb.exr
+  python3 scripts/render.py model.glb --cycles --passes ao,mist,object_index -o thumb.png
+  python3 scripts/render.py model.glb --turntable --passes ao,mist -o 'turn_####.exr'
+
+Every alpha result states `alpha.mode` (straight | premultiplied). PNG and .mov are written
+straight; an .exr is a multilayer EXR, premultiplied. --alpha-mode premultiplied on a PNG
+multiplies the colour by the alpha after the render; the other mismatches are refused.
+--passes NAME,... (beauty, shadow, ao, mist, object_index) writes the passes into the .exr, or
+one PNG per pass (`NAME.<pass>.png`, linear data, 16-bit) next to a .png beauty; the result's
+"passes" block is read back from the written files. Eevee writes shadow, not object_index;
+Cycles writes object_index, not shadow; a pass the engine cannot write is refused.
 """
 import argparse
 import json
@@ -49,6 +63,12 @@ def main() -> int:
     ap.add_argument("--samples", type=int, help="override the sample count (default 64, or 16 with --fast)")
     ap.add_argument("--transparent", action="store_true",
                     help="render with alpha: RGBA PNG (still or sequence) or ProRes 4444 .mov; refuses .mp4")
+    ap.add_argument("--alpha-mode", metavar="|".join(_render_output.ALPHA_MODES),
+                    help="how the alpha result stores its colour (default: the format's own -- straight for PNG/.mov, "
+                         "premultiplied for .exr); needs --transparent or an .exr output")
+    ap.add_argument("--passes", metavar="LIST",
+                    help="comma-separated render passes: " + ", ".join(_render_output.PASSES)
+                         + "; into an .exr output, or one PNG per pass next to a .png output")
     _common.add_common_args(ap)
     args = ap.parse_args()
 
@@ -64,13 +84,15 @@ def main() -> int:
 
         resolution = _render_output.resolve_resolution(args.resolution_preset, args.resolution)
         output = str(Path(args.out).resolve())
+        engine = "cycles" if args.cycles else "eevee"
         settings = _render_output.output_settings(mode, output, transparent=args.transparent,
-                                                  fps=args.fps, frames=args.frames)
+                                                  fps=args.fps, frames=args.frames, alpha_mode=args.alpha_mode,
+                                                  passes=args.passes, engine=engine)
         bpy_args = {
             "path": str(path.resolve()), "format": fmt, "output": output,
             "mode": mode, "frames": args.frames, "fps": args.fps,
             "resolution": [resolution["width"], resolution["height"]],
-            "engine": "cycles" if args.cycles else "eevee", "light": args.light,
+            "engine": engine, "light": args.light,
             "samples": args.samples, "fast": args.fast, "output_settings": settings,
         }
         if args.dry_run:
@@ -87,12 +109,28 @@ def main() -> int:
 
     data = result["data"]
     data["resolution"] = resolution
-    if args.transparent:
+    pass_extra = {k: data.pop(k) for k in ("mist", "object_index_map", "exr_layers") if k in data}
+    first = data.get("sequence", {}).get("first_frame") or data.get("output_path")
+    plan = settings.get("frame_plan")
+    if str(first).lower().endswith(".exr"):
+        report = _render_output.exr_passes_report(first, plan["passes"] if plan else [])
+        data["passes"] = dict(report, engine=engine, container="exr_multilayer")
+        data["alpha"] = _render_output.with_alpha_mode(
+            {"path": first, "has_alpha": report["has_alpha"], "verified": report["has_alpha"]}, settings.get("alpha_mode"))
+    elif args.transparent:
         if data.get("kind") == "video":
             data["alpha"] = _render_output.video_alpha_report(data["output_path"])
         else:
-            frame = data.get("sequence", {}).get("first_frame") or data.get("output_path")
-            data["alpha"] = _render_output.alpha_report(frame)
+            data["alpha"] = _render_output.alpha_report(first)
+        data["alpha"] = _render_output.with_alpha_mode(data["alpha"], settings.get("alpha_mode"))
+    if plan and plan["passes"] and not str(first).lower().endswith(".exr"):
+        data["passes"] = _render_output.png_passes_report(first, plan["passes"], pass_extra.pop("exr_layers", []))
+        data["passes"].update(engine=engine, container="png")
+        if settings.get("pass_sequences"):
+            data["passes"]["sequences"] = settings["pass_sequences"]
+    if "passes" in data:
+        pass_extra.pop("exr_layers", None)
+        data["passes"].update(pass_extra)
     if args.json:
         print(json.dumps(data, indent=2, sort_keys=True))
     else:
@@ -101,7 +139,11 @@ def main() -> int:
             print(f"  warning: {data['warning']}")
         if "alpha" in data:
             alpha = data["alpha"]
-            print("  alpha: " + ("verified" if alpha["verified"] else f"NOT verified ({alpha.get('reason')})"))
+            print("  alpha: " + ("verified" if alpha["verified"] else f"NOT verified ({alpha.get('reason')})")
+                  + (f", {alpha['mode']}" if alpha.get("mode") else ""))
+        if "passes" in data:
+            p = data["passes"]
+            print("  passes: " + ", ".join(p["passes"]) + ("" if p["verified"] else f" (missing: {', '.join(p['missing'])})"))
     return 0
 
 

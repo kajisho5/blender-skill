@@ -38,7 +38,9 @@ _DESCRIPTIONS = {
     "lod": "Batch-generate LOD0 (original) through LOD3 files at decreasing triangle counts, one output file per level.",
     "optimize": "Decimate, weld vertices, recalc normals, triangulate, cap texture size, purge unused data.",
     "render": "Render a thumbnail, turntable animation, or 4-view sheet. Frame size: --resolution-preset "
-              + "|".join(RESOLUTION_PRESETS) + " or an explicit --resolution W H (wins over the preset).",
+              + "|".join(RESOLUTION_PRESETS) + " or an explicit --resolution W H (wins over the preset). "
+              "--transparent for alpha (the result states alpha.mode straight|premultiplied; --alpha-mode picks it), "
+              "--passes beauty,shadow,ao,mist,object_index into a multilayer .exr or one PNG per pass.",
     "look": "UV layout, wireframe render, texture grid, or before/after comparison image.",
     "check": "PASS/WARN/FAIL a file against a delivery target's budget (three.js, Unity, Unreal, Godot, iOS/Android AR, WebXR, 3D printing, Sketchfab).",
     "fit": "Automatically re-optimize in escalating stages until a file fits a check.py target's own budget, or report honestly that it still doesn't.",
